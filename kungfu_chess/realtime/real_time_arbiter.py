@@ -3,8 +3,8 @@ from typing import Callable, Optional
 from kungfu_chess.model.board import Board
 from kungfu_chess.model.piece import Piece, PieceState
 from kungfu_chess.model.position import Position
-from kungfu_chess.realtime.motion import Motion, JumpMotion, travel_duration_ms
-from kungfu_chess.config import JUMP_DURATION_MS
+from kungfu_chess.realtime.motion import Motion, JumpMotion, CooldownTimer, travel_duration_ms
+from kungfu_chess.config import JUMP_DURATION_MS, COOLDOWN_MS
 
 
 class RealTimeArbiter:
@@ -21,16 +21,20 @@ class RealTimeArbiter:
     Does not contain chess legality logic, rendering, or input handling.
     """
 
-    def __init__(self, board: Board, on_king_captured: Callable[[], None]):
+    def __init__(self, board: Board, on_king_captured: Callable[[], None],
+                 on_piece_arrived: Callable[[Piece], None]):
         """
         :param board:             The logical board to mutate on arrival.
         :param on_king_captured:  Called when a king is captured during arrival resolution.
+        :param on_piece_arrived:  Called after a piece lands at its destination.
         """
         self._board             = board
         self._on_king_captured  = on_king_captured
+        self._on_piece_arrived  = on_piece_arrived
         self._clock_ms:    int  = 0
-        self._motions:     list[Motion]     = []
-        self._jumps:       list[JumpMotion] = []
+        self._motions:     list[Motion]      = []
+        self._jumps:       list[JumpMotion]  = []
+        self._cooldowns:   list[CooldownTimer] = []
 
     # --- Public API ---
 
@@ -83,25 +87,51 @@ class RealTimeArbiter:
             landing_time=self._clock_ms + JUMP_DURATION_MS,
         ))
 
+    def is_on_cooldown(self, piece: Piece) -> bool:
+        """Return True if piece is currently in its post-arrival cooldown."""
+        return any(c.piece is piece for c in self._cooldowns)
+
     def advance_time(self, ms: int) -> None:
         """
         Advance the simulated clock by ms milliseconds and resolve all arrivals.
         """
         self._clock_ms += ms
         self._resolve_arrivals()
+        self._expire_cooldowns()
         self._expire_jumps()
 
     # --- Private resolution ---
 
     def _resolve_arrivals(self) -> None:
-        due      = [m for m in self._motions if self._clock_ms >= m.arrival_time]
-        pending  = [m for m in self._motions if self._clock_ms <  m.arrival_time]
+        due     = [m for m in self._motions if self._clock_ms >= m.arrival_time]
+        pending = [m for m in self._motions if self._clock_ms <  m.arrival_time]
         due.sort(key=lambda m: m.arrival_time)
 
-        for motion in due:
+        # Collision: two pieces arriving at the same dest in the same tick — both bounce back
+        dest_counts: dict[Position, int] = {}
+        for m in due:
+            dest_counts[m.dest] = dest_counts.get(m.dest, 0) + 1
+
+        colliding = {dest for dest, count in dest_counts.items() if count > 1}
+        resolved, bounced = [], []
+        for m in due:
+            (bounced if m.dest in colliding else resolved).append(m)
+
+        for motion in bounced:
+            self._bounce(motion)
+        for motion in resolved:
             self._apply_arrival(motion)
 
         self._motions = pending
+
+    def _start_cooldown(self, piece: Piece, from_time: int) -> None:
+        """Put piece into COOLING state for COOLDOWN_MS after from_time."""
+        piece.state = PieceState.COOLING
+        self._cooldowns.append(CooldownTimer(piece=piece, ready_time=from_time + COOLDOWN_MS))
+
+    def _bounce(self, motion: Motion) -> None:
+        """Cancel a colliding motion — piece stays at src and enters cooldown."""
+        self._start_cooldown(motion.piece, motion.arrival_time)
 
     def _apply_arrival(self, motion: Motion) -> None:
         """Resolve a single arriving motion atomically."""
@@ -138,11 +168,13 @@ class RealTimeArbiter:
         return False
 
     def _land(self, motion: Motion) -> None:
-        """Place the arriving piece at dest, capture any enemy there, and apply promotion."""
+        """Place the arriving piece at dest, capture any enemy there, then notify arrival."""
         captured = self._board.piece_at(motion.dest)
         self._board.move_piece(motion.src, motion.dest)
-        motion.piece.state = PieceState.IDLE
-        self._apply_promotion(motion.piece)
+        self._start_cooldown(motion.piece, motion.arrival_time)
+        if motion.piece.state is not PieceState.COOLING:
+            motion.piece.state = PieceState.IDLE
+        self._on_piece_arrived(motion.piece)
         if captured is not None and Piece.is_royal(captured.kind):
             self._on_king_captured()
 
@@ -156,12 +188,6 @@ class RealTimeArbiter:
             None,
         )
 
-    def _apply_promotion(self, piece: Piece) -> None:
-        """Promote a pawn that has reached its promotion row."""
-        promoted_kind = Piece.promotion_kind(piece.kind)
-        if promoted_kind is not None and piece.cell.row == Piece.promotion_row(piece.color, self._board.height):
-            piece.kind = promoted_kind
-
     def _expire_jumps(self) -> None:
         """Remove jumps whose landing time has passed and reset piece state."""
         active = []
@@ -172,3 +198,14 @@ class RealTimeArbiter:
             else:
                 active.append(j)
         self._jumps = active
+
+    def _expire_cooldowns(self) -> None:
+        """Reset pieces whose cooldown has expired to IDLE."""
+        active = []
+        for c in self._cooldowns:
+            if self._clock_ms >= c.ready_time:
+                if c.piece.state is PieceState.COOLING:
+                    c.piece.state = PieceState.IDLE
+            else:
+                active.append(c)
+        self._cooldowns = active

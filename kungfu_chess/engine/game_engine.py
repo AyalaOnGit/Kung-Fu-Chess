@@ -2,6 +2,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from kungfu_chess.model.board import Board
 from kungfu_chess.model.game_state import GameState
+from kungfu_chess.model.piece import Piece
 from kungfu_chess.model.position import Position
 from kungfu_chess.rules.rule_engine import RuleEngine
 from kungfu_chess.realtime.real_time_arbiter import RealTimeArbiter
@@ -47,9 +48,8 @@ class GameEngine:
 
         Guards (in order):
           1. game_over
-          2. piece at src is already in motion or jumping
-          3. same-color motion already active (one motion per color)
-          4. RuleEngine validation
+          2. piece at src is already in motion, jumping, or cooling down
+          3. RuleEngine validation
 
         :return: MoveResult with is_accepted and reason.
         """
@@ -63,7 +63,7 @@ class GameEngine:
         if piece is None:
             return MoveResult(False, REASON_EMPTY_SOURCE)
 
-        if self._arbiter.has_active_motion():
+        if self._arbiter.is_on_cooldown(piece):
             return MoveResult(False, REASON_MOTION_IN_PROGRESS)
 
         validation = self._rule_engine.validate_move(self._state.board, src, dest)
@@ -99,6 +99,12 @@ class GameEngine:
     def on_king_captured(self) -> None:
         """Called by RealTimeArbiter when a king is captured."""
         self._state.game_over = True
+
+    def on_piece_arrived(self, piece: Piece) -> None:
+        """Called by RealTimeArbiter when a piece lands at its destination."""
+        promoted_kind = Piece.promotion_kind(piece.kind)
+        if promoted_kind is not None and piece.cell.row == Piece.promotion_row(piece.color, self._state.board.height):
+            piece.kind = promoted_kind
 
     # --- Read-only access ---
 

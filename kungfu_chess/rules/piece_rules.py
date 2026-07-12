@@ -149,8 +149,8 @@ class PawnRule(PieceRule):
 
     @staticmethod
     def _start_row(color: Color, height: int) -> int:
-        """Return the starting row for double-move. White starts on the last row, black on row 0."""
-        return height - 1 if color is Color.WHITE else 0
+        """Return the starting row for double-move. White starts on row height-2, black on row 1."""
+        return height - 2 if color is Color.WHITE else 1
 
 
 # --- Registry ---

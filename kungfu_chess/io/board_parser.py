@@ -1,18 +1,12 @@
 from __future__ import annotations
+from itertools import count
 from kungfu_chess.model.position import Position
 from kungfu_chess.model.piece import Piece, Color, Kind
 from kungfu_chess.model.board import Board
 
 _COLOR_MAP = {c.value: c for c in Color}
 _KIND_MAP  = {k.value: k for k in Kind}
-
-_next_id = 0
-
-
-def _new_id() -> int:
-    global _next_id
-    _next_id += 1
-    return _next_id
+_id_counter = count(1)
 
 
 def parse_board(lines: list[str]) -> Board:
@@ -45,7 +39,7 @@ def parse_board(lines: list[str]) -> Board:
             if len(token) != 2 or token[0] not in _COLOR_MAP or token[1] not in _KIND_MAP:
                 raise ValueError("ERROR UNKNOWN_TOKEN")
             piece = Piece(
-                id=_new_id(),
+                id=next(_id_counter),
                 color=_COLOR_MAP[token[0]],
                 kind=_KIND_MAP[token[1]],
                 cell=Position(r, c),

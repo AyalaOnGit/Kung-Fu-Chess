@@ -29,6 +29,7 @@ class PieceState(Enum):
     IDLE     = 'idle'
     MOVING   = 'moving'
     JUMPING  = 'jumping'
+    COOLING  = 'cooling'   # post-arrival cooldown, cannot move yet
     CAPTURED = 'captured'
 
 

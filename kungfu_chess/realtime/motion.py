@@ -17,6 +17,17 @@ def travel_duration_ms(src: Position, dest: Position) -> int:
 
 
 @dataclass
+class CooldownTimer:
+    """
+    Represents a piece that is cooling down after arriving at its destination.
+
+    The piece cannot be moved again until ready_time is reached.
+    """
+    piece:      Piece
+    ready_time: int   # absolute clock ms when cooldown expires
+
+
+@dataclass
 class Motion:
     """
     Represents a piece in transit from src to dest.

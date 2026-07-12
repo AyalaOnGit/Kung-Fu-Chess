@@ -13,7 +13,11 @@ def build_engine(board: Board) -> GameEngine:
     """Wire all layers together and return a ready GameEngine."""
     state   = GameState(board)
     engine  = GameEngine.__new__(GameEngine)
-    arbiter = RealTimeArbiter(board, on_king_captured=engine.on_king_captured)
+    arbiter = RealTimeArbiter(
+        board,
+        on_king_captured=engine.on_king_captured,
+        on_piece_arrived=engine.on_piece_arrived,
+    )
     GameEngine.__init__(engine, state, RuleEngine(), arbiter)
     return engine
 
