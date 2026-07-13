@@ -1,5 +1,6 @@
 from __future__ import annotations
-from kungfu_chess.engine.game_engine import GameEngine, MoveResult
+from kungfu_chess.engine.game_engine import GameEngine
+from kungfu_chess.engine.commands import CommandResult
 from kungfu_chess.input.controller import Controller
 from kungfu_chess.io.board_printer import board_to_lines
 

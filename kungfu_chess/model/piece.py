@@ -61,20 +61,8 @@ class Piece:
         """Return True if capturing this kind ends the game."""
         return kind is Kind.KING
 
-    @staticmethod
-    def promotion_kind(kind: Kind) -> Kind:
-        """
-        Return the Kind this piece promotes to upon reaching the last row, or None.
-
-        Currently only pawns promote (to queen).
-        """
-        return Kind.QUEEN if kind is Kind.PAWN else None
-
-    @staticmethod
-    def promotion_row(color: Color, height: int) -> int:
-        """
-        Return the row index at which a pawn of the given color promotes.
-
-        White promotes at row 0 (top), black at row height-1 (bottom).
-        """
-        return 0 if color is Color.WHITE else height - 1
+    def try_promote(self, board_height: int) -> None:
+        """Promote this piece in-place if it has reached its promotion row."""
+        target_row = 0 if self.color is Color.WHITE else board_height - 1
+        if self.kind is Kind.PAWN and self.cell.row == target_row:
+            self.kind = Kind.QUEEN

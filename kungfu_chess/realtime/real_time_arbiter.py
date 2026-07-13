@@ -22,18 +22,17 @@ class RealTimeArbiter:
     """
 
     def __init__(self, board: Board, on_king_captured: Callable[[], None],
-                 on_piece_arrived: Callable[[Piece], None]):
-        """
-        :param board:             The logical board to mutate on arrival.
-        :param on_king_captured:  Called when a king is captured during arrival resolution.
-        :param on_piece_arrived:  Called after a piece lands at its destination.
-        """
+                 on_piece_arrived: Callable[[Piece], None],
+                 cooldown_ms: int = COOLDOWN_MS,
+                 jump_duration_ms: int = JUMP_DURATION_MS):
         self._board             = board
         self._on_king_captured  = on_king_captured
         self._on_piece_arrived  = on_piece_arrived
+        self._cooldown_ms       = cooldown_ms
+        self._jump_duration_ms  = jump_duration_ms
         self._clock_ms:    int  = 0
-        self._motions:     list[Motion]      = []
-        self._jumps:       list[JumpMotion]  = []
+        self._motions:     list[Motion]        = []
+        self._jumps:       list[JumpMotion]    = []
         self._cooldowns:   list[CooldownTimer] = []
 
     # --- Public API ---
@@ -84,7 +83,7 @@ class RealTimeArbiter:
         self._jumps.append(JumpMotion(
             piece=piece,
             cell=piece.cell,
-            landing_time=self._clock_ms + JUMP_DURATION_MS,
+            landing_time=self._clock_ms + self._jump_duration_ms,
         ))
 
     def is_on_cooldown(self, piece: Piece) -> bool:
@@ -107,19 +106,7 @@ class RealTimeArbiter:
         pending = [m for m in self._motions if self._clock_ms <  m.arrival_time]
         due.sort(key=lambda m: m.arrival_time)
 
-        # Collision: two pieces arriving at the same dest in the same tick — both bounce back
-        dest_counts: dict[Position, int] = {}
-        for m in due:
-            dest_counts[m.dest] = dest_counts.get(m.dest, 0) + 1
-
-        colliding = {dest for dest, count in dest_counts.items() if count > 1}
-        resolved, bounced = [], []
-        for m in due:
-            (bounced if m.dest in colliding else resolved).append(m)
-
-        for motion in bounced:
-            self._bounce(motion)
-        for motion in resolved:
+        for motion in due:
             self._apply_arrival(motion)
 
         self._motions = pending
@@ -127,7 +114,7 @@ class RealTimeArbiter:
     def _start_cooldown(self, piece: Piece, from_time: int) -> None:
         """Put piece into COOLING state for COOLDOWN_MS after from_time."""
         piece.state = PieceState.COOLING
-        self._cooldowns.append(CooldownTimer(piece=piece, ready_time=from_time + COOLDOWN_MS))
+        self._cooldowns.append(CooldownTimer(piece=piece, ready_time=from_time + self._cooldown_ms))
 
     def _bounce(self, motion: Motion) -> None:
         """Cancel a colliding motion — piece stays at src and enters cooldown."""
@@ -160,12 +147,31 @@ class RealTimeArbiter:
         return True
 
     def _is_blocked_by_friendly(self, motion: Motion) -> bool:
-        """Return True (and cancel motion) if a friendly piece already occupies dest."""
+        """Return True (and stop piece one cell before dest) if a friendly occupies dest."""
         dest_piece = self._board.piece_at(motion.dest)
-        if dest_piece is not None and dest_piece.color == motion.piece.color:
+        if dest_piece is None or dest_piece.color != motion.piece.color:
+            return False
+        stop = self._cell_before_dest(motion)
+        if stop == motion.src:
             motion.piece.state = PieceState.IDLE
-            return True
-        return False
+        else:
+            self._board.move_piece(motion.src, stop)
+            self._start_cooldown(motion.piece, motion.arrival_time)
+            if motion.piece.state is not PieceState.COOLING:
+                motion.piece.state = PieceState.IDLE
+            self._on_piece_arrived(motion.piece)
+        return True
+
+    def _cell_before_dest(self, motion: Motion) -> Position:
+        """Return the last cell along the path from src to dest before dest itself."""
+        dr = motion.dest.row - motion.src.row
+        dc = motion.dest.col - motion.src.col
+        steps = max(abs(dr), abs(dc))
+        if steps <= 1:
+            return motion.src
+        step_r = dr // steps
+        step_c = dc // steps
+        return Position(motion.dest.row - step_r, motion.dest.col - step_c)
 
     def _land(self, motion: Motion) -> None:
         """Place the arriving piece at dest, capture any enemy there, then notify arrival."""

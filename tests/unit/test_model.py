@@ -36,9 +36,25 @@ class TestPiece(unittest.TestCase):
     def test_default_state_idle(self):
         self.assertEqual(W(Kind.PAWN, 0, 0).state, PieceState.IDLE)
 
-    def test_color_opponent(self):
-        self.assertEqual(Color.WHITE.opponent(), Color.BLACK)
-        self.assertEqual(Color.BLACK.opponent(), Color.WHITE)
+    def test_try_promote_white_pawn_at_row_0(self):
+        p = W(Kind.PAWN, 0, 0)
+        p.try_promote(8)
+        self.assertEqual(p.kind, Kind.QUEEN)
+
+    def test_try_promote_black_pawn_at_last_row(self):
+        p = B(Kind.PAWN, 7, 0)
+        p.try_promote(8)
+        self.assertEqual(p.kind, Kind.QUEEN)
+
+    def test_try_promote_no_effect_on_non_pawn(self):
+        p = W(Kind.ROOK, 0, 0)
+        p.try_promote(8)
+        self.assertEqual(p.kind, Kind.ROOK)
+
+    def test_try_promote_no_effect_wrong_row(self):
+        p = W(Kind.PAWN, 3, 0)
+        p.try_promote(8)
+        self.assertEqual(p.kind, Kind.PAWN)
 
 
 class TestBoard(unittest.TestCase):

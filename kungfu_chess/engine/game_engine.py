@@ -1,21 +1,10 @@
 from __future__ import annotations
-from dataclasses import dataclass
 from kungfu_chess.model.board import Board
 from kungfu_chess.model.game_state import GameState
 from kungfu_chess.model.piece import Piece
-from kungfu_chess.model.position import Position
 from kungfu_chess.rules.rule_engine import RuleEngine
 from kungfu_chess.realtime.real_time_arbiter import RealTimeArbiter
-from kungfu_chess.config import (
-    REASON_OK, REASON_GAME_OVER, REASON_MOTION_IN_PROGRESS, REASON_EMPTY_SOURCE,
-)
-
-
-@dataclass(frozen=True)
-class MoveResult:
-    """Result of a GameEngine.request_move call."""
-    is_accepted: bool
-    reason:      str  # 'ok' | 'game_over' | 'motion_in_progress' | rule-level reason
+from kungfu_chess.engine.commands import GameCommand, CommandResult
 
 
 class GameEngine:
@@ -23,12 +12,9 @@ class GameEngine:
     Application-service coordinator.
 
     Responsibilities:
-      - Enforce game_over guard before any move.
-      - Enforce one-active-motion policy.
-      - Delegate move validation to RuleEngine.
-      - Start validated motions through RealTimeArbiter.
-      - Delegate wait(ms) to RealTimeArbiter.
-      - Receive king-capture notification and set game_over.
+      - Accept and execute GameCommand objects.
+      - Advance simulated time via wait().
+      - Receive king-capture and piece-arrived notifications (private).
 
     Does not contain piece-specific movement logic, pixel mapping,
     rendering, text parsing, or test-runner logic.
@@ -40,71 +26,23 @@ class GameEngine:
         self._rule_engine = rule_engine
         self._arbiter     = arbiter
 
-    # --- Public command boundary ---
-
-    def request_move(self, src: Position, dest: Position) -> MoveResult:
-        """
-        Attempt to move the piece at src to dest.
-
-        Guards (in order):
-          1. game_over
-          2. piece at src is already in motion, jumping, or cooling down
-          3. RuleEngine validation
-
-        :return: MoveResult with is_accepted and reason.
-        """
-        if self._state.game_over:
-            return MoveResult(False, REASON_GAME_OVER)
-
-        if self._arbiter.is_piece_in_motion(src) or self._arbiter.has_active_jump(src):
-            return MoveResult(False, REASON_MOTION_IN_PROGRESS)
-
-        piece = self._state.board.piece_at(src)
-        if piece is None:
-            return MoveResult(False, REASON_EMPTY_SOURCE)
-
-        if self._arbiter.is_on_cooldown(piece):
-            return MoveResult(False, REASON_MOTION_IN_PROGRESS)
-
-        validation = self._rule_engine.validate_move(self._state.board, src, dest)
-        if not validation.is_valid:
-            return MoveResult(False, validation.reason)
-
-        self._arbiter.start_motion(piece, src, dest)
-        return MoveResult(True, REASON_OK)
-
-    def request_jump(self, cell: Position) -> MoveResult:
-        """
-        Attempt to make the piece at cell perform a jump.
-
-        :return: MoveResult with is_accepted and reason.
-        """
-        if self._state.game_over:
-            return MoveResult(False, REASON_GAME_OVER)
-
-        if self._arbiter.is_piece_in_motion(cell) or self._arbiter.has_active_jump(cell):
-            return MoveResult(False, REASON_MOTION_IN_PROGRESS)
-
-        piece = self._state.board.piece_at(cell)
-        if piece is None:
-            return MoveResult(False, REASON_EMPTY_SOURCE)
-
-        self._arbiter.start_jump(piece)
-        return MoveResult(True, REASON_OK)
+    def execute(self, command: GameCommand) -> CommandResult:
+        """Execute a GameCommand and return its result."""
+        return command.execute(self._state, self._rule_engine, self._arbiter)
 
     def wait(self, ms: int) -> None:
         """Advance simulated time by ms milliseconds."""
         self._arbiter.advance_time(ms)
 
-    def on_king_captured(self) -> None:
-        """Called by RealTimeArbiter when a king is captured."""
+    def _on_king_captured(self) -> None:
         self._state.game_over = True
 
-    def on_piece_arrived(self, piece: Piece) -> None:
-        """Called by RealTimeArbiter when a piece lands at its destination."""
-        promoted_kind = Piece.promotion_kind(piece.kind)
-        if promoted_kind is not None and piece.cell.row == Piece.promotion_row(piece.color, self._state.board.height):
-            piece.kind = promoted_kind
+    def _on_piece_arrived(self, piece: Piece) -> None:
+        piece.try_promote(self._state.board.height)
+
+    def force_game_over(self) -> None:
+        """Force game_over state — intended for testing only."""
+        self._state.game_over = True
 
     # --- Read-only access ---
 

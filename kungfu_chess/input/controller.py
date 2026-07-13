@@ -3,6 +3,7 @@ from typing import Optional
 from kungfu_chess.model.position import Position
 from kungfu_chess.input.board_mapper import BoardMapper
 from kungfu_chess.engine.game_engine import GameEngine
+from kungfu_chess.engine.commands import MoveCommand, JumpCommand
 
 
 class Controller:
@@ -42,7 +43,7 @@ class Controller:
             if clicked is not None and selected_piece is not None and clicked.color == selected_piece.color:
                 self._selected = pos
             else:
-                self._engine.request_move(self._selected, pos)
+                self._engine.execute(MoveCommand(self._selected, pos))
                 self._selected = None
 
     def on_jump(self, x: int, y: int) -> None:
@@ -50,7 +51,7 @@ class Controller:
         if not self._mapper.in_bounds_px(x, y):
             return
         pos = self._mapper.pixel_to_position(x, y)
-        self._engine.request_jump(pos)
+        self._engine.execute(JumpCommand(pos))
         self._selected = None
 
     @property
