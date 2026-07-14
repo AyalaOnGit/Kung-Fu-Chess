@@ -81,7 +81,30 @@ class GameFacade:
         :param x: pixel x coordinate
         :param y: pixel y coordinate
         """
-        self._controller.on_click(x, y)
+        result, src, dst = self._controller.on_click(x, y)
+        if result is None:
+            return
+        command_result, src_pos, dst_pos, piece = result
+        if command_result.is_accepted and piece is not None:
+            # Publish the accepted move immediately for UI feedback
+            self._subject.publish(MoveAccepted(piece=piece, src_pos=src_pos, dst_pos=dst_pos))
+            # Track the motion so we can diff the board and detect captures when it completes
+            motion_duration_ms = self._calculate_motion_duration(src_pos, dst_pos)
+            self._pending_motions[piece.id] = PendingMotionData(
+                piece=piece,
+                src_pos=src_pos,
+                dst_pos=dst_pos,
+                is_jump=False,
+                motion_end_time_ms=self._engine.clock_ms + motion_duration_ms,
+            )
+
+    def _calculate_motion_duration(self, src_pos: Position, dst_pos: Position) -> float:
+        """Calculate motion duration in milliseconds for a move."""
+        distance_cells = abs(dst_pos.col - src_pos.col)
+        if distance_cells == 0:
+            distance_cells = abs(dst_pos.row - src_pos.row)
+        distance_px = distance_cells * CELL_SIZE_PX
+        return (distance_px / PIECE_SPEED_PPS) * 1000.0
     
     # --- Core loop ---
     

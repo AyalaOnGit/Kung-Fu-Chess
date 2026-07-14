@@ -5,9 +5,8 @@ No rendering or game knowledge—just adapts click coordinates into
 the server's command interface.
 """
 from __future__ import annotations
-from typing import Optional
+from typing import Callable
 import cv2
-from kungfu_chess.input.controller import Controller
 
 
 class MouseController:
@@ -20,8 +19,8 @@ class MouseController:
       - Ignore right-click, movement, etc.
     """
     
-    def __init__(self, server_controller: Controller):
-        self._controller = server_controller
+    def __init__(self, click_handler: Callable[[int, int], None]):
+        self._click_handler = click_handler
     
     def on_mouse_event(self, event: int, x: int, y: int, flags: int, param: None) -> None:
         """
@@ -35,4 +34,4 @@ class MouseController:
         """
         # Only process left click
         if event == cv2.EVENT_LBUTTONDOWN:
-            self._controller.on_click(x, y)
+            self._click_handler(x, y)

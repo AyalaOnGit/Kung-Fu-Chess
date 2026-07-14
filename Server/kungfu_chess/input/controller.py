@@ -25,11 +25,11 @@ class Controller:
         self._mapper:   BoardMapper      = mapper
         self._selected: Optional[Position] = None
 
-    def on_click(self, x: int, y: int) -> None:
+    def on_click(self, x: int, y: int) -> tuple[None | tuple[CommandResult, Position, Position, Piece], None | Position, None | Position]:
         """Process a click at pixel (x, y)."""
         if not self._mapper.in_bounds_px(x, y):
             self._selected = None
-            return
+            return None, None, None
 
         pos = self._mapper.pixel_to_position(x, y)
 
@@ -37,14 +37,20 @@ class Controller:
             piece = self._engine.board.piece_at(pos)
             if piece is not None:
                 self._selected = pos
+            return None, None, None
         else:
             clicked = self._engine.board.piece_at(pos)
             selected_piece = self._engine.board.piece_at(self._selected)
             if clicked is not None and selected_piece is not None and clicked.color == selected_piece.color:
                 self._selected = pos
+                return None, None, None
             else:
-                self._engine.execute(MoveCommand(self._selected, pos))
+                piece = self._engine.board.piece_at(self._selected)
+                result = self._engine.execute(MoveCommand(self._selected, pos))
+                src = self._selected
+                dst = pos
                 self._selected = None
+                return (result, src, dst, piece), src, dst
 
     def on_jump(self, x: int, y: int) -> None:
         """Process a jump command at pixel (x, y)."""

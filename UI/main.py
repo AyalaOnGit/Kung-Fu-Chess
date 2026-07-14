@@ -23,6 +23,9 @@ from graphics.hud_renderer import HudRenderer
 from animation.animation_clock import AnimationClock
 from user_input.mouse_controller import MouseController
 from state.game_facade import GameFacade
+from ui_components.moves_log_panel import MovesLogPanel
+from ui_components.score_panel import ScorePanel
+from kungfu_chess.model.piece import Color
 
 from kungfu_chess.factory import build_engine
 from kungfu_chess.io.board_parser import parse_board
@@ -50,7 +53,7 @@ def main():
     facade = GameFacade(engine, mapper)
     
     # Mouse input
-    mouse_controller = MouseController(facade._controller)
+    mouse_controller = MouseController(facade.request_click)
     
     # Window
     window = Window(WINDOW_TITLE, 800 + 300, 800)
@@ -62,9 +65,13 @@ def main():
     # Subscribe to facade events
     def on_event(event):
         print(f"Event: {type(event).__name__}: {event}")
-    
+
+    moves_log_panel = MovesLogPanel()
+    score_panel = ScorePanel()
     facade.subscribe(on_event)
-    
+    facade.subscribe(moves_log_panel.on_event)
+    facade.subscribe(score_panel.on_event)
+
     # Main loop
     frame_count = 0
     
@@ -85,6 +92,11 @@ def main():
         # Render
         try:
             board_frame = renderer.render(dt_ms)
+            hud_renderer.set_moves(moves_log_panel.get_moves())
+            hud_renderer.update_score(
+                white_score=score_panel.get_score(Color.WHITE),
+                black_score=score_panel.get_score(Color.BLACK),
+            )
             full_frame = hud_renderer.render(board_frame)
         except Exception as e:
             print(f"Error in rendering: {e}")

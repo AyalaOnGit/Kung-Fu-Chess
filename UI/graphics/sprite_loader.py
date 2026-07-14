@@ -63,7 +63,19 @@ class SpriteLoader:
             return self._cache[key]
         
         # Construct path: pieces/QB/states/idle/sprites/
-        state_dir = self._pieces_dir / piece_code / "states" / state
+        base_piece_dir = self._pieces_dir / piece_code
+
+        # Handle case where assets are nested like `assets/pieces1/pieces1/RB/...`
+        if not base_piece_dir.exists():
+            # If pieces_dir contains a single subdirectory (e.g. 'pieces1'), try that
+            try:
+                children = [p for p in self._pieces_dir.iterdir() if p.is_dir()]
+            except Exception:
+                children = []
+            if len(children) == 1 and (children[0] / piece_code).exists():
+                base_piece_dir = children[0] / piece_code
+
+        state_dir = base_piece_dir / "states" / state
         sprites_dir = state_dir / "sprites"
         config_file = state_dir / "config.json"
         

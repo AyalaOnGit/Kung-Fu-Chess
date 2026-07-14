@@ -105,8 +105,39 @@ class BoardRenderer:
                 sprite = frame_data.image
                 
                 # Draw sprite onto frame
+                # Defensive: ensure sprite is a numpy array with 2/3/4 channels
+                if not isinstance(sprite, np.ndarray):
+                    sprite = np.array(sprite, dtype=np.uint8)
+
+                if sprite.ndim == 2:
+                    # grayscale -> BGR
+                    sprite = cv2.cvtColor(sprite, cv2.COLOR_GRAY2BGR)
+
+                if sprite.ndim == 3 and sprite.shape[2] not in (3, 4):
+                    # Unexpected number of channels: try to reduce to 3 (BGR)
+                    if sprite.shape[2] >= 3:
+                        sprite = sprite[:, :, :3]
+                    else:
+                        # Repeat single channel to make 3 channels
+                        sprite = np.repeat(sprite[:, :, :1], 3, axis=2)
+
+                sprite = sprite.astype(np.uint8)
+
+                # Resize sprite to fit within a board cell while preserving aspect ratio
+                target = CELL_SIZE_PX
                 sh, sw = sprite.shape[:2]
-                
+                if sw != target or sh != target:
+                    scale = min(target / float(sw), target / float(sh))
+                    new_w = max(1, int(round(sw * scale)))
+                    new_h = max(1, int(round(sh * scale)))
+                    interp = cv2.INTER_AREA if scale < 1.0 else cv2.INTER_LINEAR
+                    sprite = cv2.resize(sprite, (new_w, new_h), interpolation=interp)
+                    sh, sw = sprite.shape[:2]
+
+                # Center sprite in the board cell
+                px_x += max(0, (CELL_SIZE_PX - sw) // 2)
+                px_y += max(0, (CELL_SIZE_PX - sh) // 2)
+
                 # Clamp to frame bounds
                 x1 = max(0, px_x)
                 y1 = max(0, px_y)
@@ -119,19 +150,22 @@ class BoardRenderer:
                     src_x2 = src_x1 + (x2 - x1)
                     src_y2 = src_y1 + (y2 - y1)
                     
+                    src_patch = sprite[src_y1:src_y2, src_x1:src_x2]
                     if sprite.shape[2] == 4:  # BGRA
-                        # Blend with alpha
-                        alpha = sprite[src_y1:src_y2, src_x1:src_x2, 3].astype(float) / 255.0
-                        for c in range(3):
-                            frame[y1:y2, x1:x2, c] = (
-                                (1 - alpha[:, :, np.newaxis] if len(alpha.shape) == 2 else (1 - alpha)) * 
-                                frame[y1:y2, x1:x2, c] +
-                                alpha[:, :, np.newaxis] * sprite[src_y1:src_y2, src_x1:src_x2, c]
-                                if len(alpha.shape) > 1 else
-                                (1 - alpha) * frame[y1:y2, x1:x2, c] + alpha * sprite[src_y1:src_y2, src_x1:src_x2, c]
-                            )
-                    else:  # BGR
-                        frame[y1:y2, x1:x2] = sprite[src_y1:src_y2, src_x1:src_x2]
+                        # Blend with alpha channel in a clear, vectorized way
+                        alpha = src_patch[:, :, 3].astype(float) / 255.0
+                        alpha = alpha[..., np.newaxis]
+                        src_rgb = src_patch[:, :, :3].astype(float)
+                        # Destination may have 3 or 4 channels; blend into first 3
+                        dst_rgb = frame[y1:y2, x1:x2, :3].astype(float)
+                        out_rgb = (1.0 - alpha) * dst_rgb + alpha * src_rgb
+                        frame[y1:y2, x1:x2, :3] = out_rgb.astype(np.uint8)
+                    else:  # BGR (3 channels)
+                        # If destination has 4 channels, write only to RGB channels
+                        if frame.shape[2] == 4:
+                            frame[y1:y2, x1:x2, :3] = src_patch
+                        else:
+                            frame[y1:y2, x1:x2] = src_patch
             except Exception as e:
                 print(f"Error drawing piece: {e}")
         
