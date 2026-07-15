@@ -52,8 +52,8 @@ def main():
     # Game facade handles user clicks and motion prediction
     facade = GameFacade(engine, mapper)
     
-    # Mouse input
-    mouse_controller = MouseController(facade.request_click)
+    # Mouse input — double-click triggers jump, single click triggers move
+    mouse_controller = MouseController(facade.request_click, facade.request_jump)
     
     # Window
     window = Window(WINDOW_TITLE, 800 + 300, 800)

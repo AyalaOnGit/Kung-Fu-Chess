@@ -17,6 +17,7 @@ from kungfu_chess.config import CELL_SIZE_PX
 from kungfu_chess.model.position import Position
 from kungfu_chess.model.board import Board
 from kungfu_chess.model.piece import Piece
+from ui_config import PIECE_SCALE
 
 
 class BoardRenderer:
@@ -88,16 +89,19 @@ class BoardRenderer:
         """
         # Start with board image
         frame = self._board_img.img.copy()
-        
+
+        # Precompute scaled piece size (same for every piece)
+        piece_size = max(1, int(round(CELL_SIZE_PX * PIECE_SCALE)))
+
         # Draw every piece on the board
         for pos, piece in self._board._grid.items():
             animator = self._get_animator(piece)
             
             # Tick animator
             animator.tick(dt_ms)
-            
-            # Get pixel position
-            px_x, px_y = self._cell_to_pixel(pos)
+
+            # Top-left pixel of this cell (do NOT mutate these)
+            cell_x, cell_y = self._cell_to_pixel(pos)
             
             # Get current sprite frame
             try:
@@ -123,20 +127,19 @@ class BoardRenderer:
 
                 sprite = sprite.astype(np.uint8)
 
-                # Resize sprite to fit within a board cell while preserving aspect ratio
-                target = CELL_SIZE_PX
+                # Resize sprite to PIECE_SCALE fraction of the cell, preserving aspect ratio
                 sh, sw = sprite.shape[:2]
-                if sw != target or sh != target:
-                    scale = min(target / float(sw), target / float(sh))
-                    new_w = max(1, int(round(sw * scale)))
-                    new_h = max(1, int(round(sh * scale)))
+                scale = min(piece_size / float(sw), piece_size / float(sh))
+                new_w = max(1, int(round(sw * scale)))
+                new_h = max(1, int(round(sh * scale)))
+                if new_w != sw or new_h != sh:
                     interp = cv2.INTER_AREA if scale < 1.0 else cv2.INTER_LINEAR
                     sprite = cv2.resize(sprite, (new_w, new_h), interpolation=interp)
                     sh, sw = sprite.shape[:2]
 
-                # Center sprite in the board cell
-                px_x += max(0, (CELL_SIZE_PX - sw) // 2)
-                px_y += max(0, (CELL_SIZE_PX - sh) // 2)
+                # Center sprite exactly in the board cell
+                px_x = cell_x + (CELL_SIZE_PX - sw) // 2
+                px_y = cell_y + (CELL_SIZE_PX - sh) // 2
 
                 # Clamp to frame bounds
                 x1 = max(0, px_x)
@@ -166,6 +169,14 @@ class BoardRenderer:
                             frame[y1:y2, x1:x2, :3] = src_patch
                         else:
                             frame[y1:y2, x1:x2] = src_patch
+
+                # Draw jump highlight — bright cyan border around the cell
+                if piece.state.value == 'jumping':
+                    self._draw_jump_highlight(frame, cell_x, cell_y)
+                # Draw cooldown highlight — orange border around the cell
+                elif piece.state.value == 'cooling':
+                    self._draw_cooldown_highlight(frame, cell_x, cell_y)
+
             except Exception as e:
                 print(f"Error drawing piece: {e}")
         
@@ -183,3 +194,27 @@ class BoardRenderer:
             print(f"Warning: frame has {frame.shape[2]} channels")
         
         return frame
+
+    def _draw_jump_highlight(self, frame: np.ndarray, cell_x: int, cell_y: int) -> None:
+        """Draw a glowing cyan border around a jumping piece's cell."""
+        margin = 3
+        x1 = cell_x + margin
+        y1 = cell_y + margin
+        x2 = cell_x + CELL_SIZE_PX - margin
+        y2 = cell_y + CELL_SIZE_PX - margin
+        # Outer glow (thicker, semi-transparent feel via two passes)
+        cv2.rectangle(frame, (x1 - 2, y1 - 2), (x2 + 2, y2 + 2), (180, 220, 0, 255), 2)
+        # Inner bright cyan border
+        cv2.rectangle(frame, (x1, y1), (x2, y2), (255, 255, 0, 255), 3)
+
+    def _draw_cooldown_highlight(self, frame: np.ndarray, cell_x: int, cell_y: int) -> None:
+        """Draw an orange border around a piece that is cooling down."""
+        margin = 3
+        x1 = cell_x + margin
+        y1 = cell_y + margin
+        x2 = cell_x + CELL_SIZE_PX - margin
+        y2 = cell_y + CELL_SIZE_PX - margin
+        # Outer glow
+        cv2.rectangle(frame, (x1 - 2, y1 - 2), (x2 + 2, y2 + 2), (0, 100, 200, 255), 2)
+        # Inner bright orange border
+        cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 165, 255, 255), 3)

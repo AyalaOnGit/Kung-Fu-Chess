@@ -52,13 +52,14 @@ class Controller:
                 self._selected = None
                 return (result, src, dst, piece), src, dst
 
-    def on_jump(self, x: int, y: int) -> None:
-        """Process a jump command at pixel (x, y)."""
+    def on_jump(self, x: int, y: int):
+        """Process a jump command at pixel (x, y). Returns CommandResult."""
         if not self._mapper.in_bounds_px(x, y):
-            return
+            return None
         pos = self._mapper.pixel_to_position(x, y)
-        self._engine.execute(JumpCommand(pos))
+        result = self._engine.execute(JumpCommand(pos))
         self._selected = None
+        return result
 
     @property
     def selected(self) -> Optional[Position]:

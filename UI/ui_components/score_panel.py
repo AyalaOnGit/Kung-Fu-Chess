@@ -30,10 +30,14 @@ class ScorePanel:
     def on_event(self, event: GameEvent) -> None:
         """Handle a game event."""
         if isinstance(event, PieceCaptured):
-            # Add capture value to capturer's side
             value = self.PIECE_VALUES.get(event.piece.kind, 0)
-            if event.capturer:
+            if event.capturer is not None:
+                # Normal capture: credit the capturer's side
                 self._captured_by_color[event.capturer.color] += value
+            else:
+                # Airborne-jump kill: the jumping piece's side gets the credit
+                # (the captured piece's opponent won the exchange)
+                self._captured_by_color[event.piece.color.opponent()] += value
     
     def get_score(self, color: Color) -> int:
         """Get captured material score for a player."""

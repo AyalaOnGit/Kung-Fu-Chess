@@ -74,6 +74,32 @@ class GameFacade:
     
     # --- User input routing ---
     
+    def request_jump(self, x: int, y: int) -> None:
+        """
+        Route a double-click jump request to the controller.
+
+        :param x: pixel x coordinate
+        :param y: pixel y coordinate
+        """
+        if not self._mapper.in_bounds_px(x, y):
+            print(f"[jump] out of bounds: ({x}, {y})")
+            return
+        pos = self._mapper.pixel_to_position(x, y)
+        piece = self._engine.board.piece_at(pos)
+        if piece is None:
+            print(f"[jump] no piece at {pos}")
+            return
+        result = self._controller.on_jump(x, y)
+        print(f"[jump] {piece.token()} at {pos} → accepted={result.is_accepted if result else 'n/a'} reason={result.reason if result else 'n/a'}")
+        # Track the jump as a pending motion so animations resolve correctly
+        self._pending_motions[piece.id] = PendingMotionData(
+            piece=piece,
+            src_pos=pos,
+            dst_pos=pos,
+            is_jump=True,
+            motion_end_time_ms=self._engine.clock_ms + JUMP_DURATION_MS,
+        )
+
     def request_click(self, x: int, y: int) -> None:
         """
         Route a mouse click to the controller.

@@ -5,8 +5,8 @@ CELL_SIZE_PX    = 100   # pixels per board cell
 PIECE_SPEED_PPS = 100   # pixels per second => 1 cell = 1000 ms
 
 # --- Timing ---
-JUMP_DURATION_MS = 1000  # ms a piece stays airborne during a jump
-COOLDOWN_MS     = 0  # ms a piece must wait after arriving before it can move again
+JUMP_DURATION_MS = 3000  # ms a piece stays airborne during a jump
+COOLDOWN_MS     = 1500  # ms a piece must wait after arriving before it can move again
 
 # --- Move result reasons ---
 REASON_OK                  = 'ok'

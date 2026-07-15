@@ -16,6 +16,9 @@ SIDEBAR_BG_COLOR = (40, 40, 40)
 TEXT_COLOR = (200, 200, 200)
 TEXT_DARK = (100, 100, 100)
 
+# Piece size relative to cell (0.0–1.0); 0.75 = 75px out of 100px per cell
+PIECE_SCALE = 0.75
+
 # Piece animation skin: "pieces1" or "pieces3"
 SKIN = "pieces1"
 
