@@ -15,7 +15,10 @@ if str(ui_dir) not in sys.path:
 # MUST import server_bridge first, before any server imports
 import server_bridge  # noqa: F401
 
-from ui_config import WINDOW_TITLE, BOARD_IMAGE_PATH, PIECES_PATH, FPS_TARGET
+from ui_config import (WINDOW_TITLE, BOARD_IMAGE_PATH, PIECES_PATH, FPS_TARGET,
+                       PLAYER_WHITE, PLAYER_BLACK,
+                       BOARD_OFFSET_X, BOARD_OFFSET_Y,
+                       BOARD_COL_BOUNDARIES, BOARD_ROW_BOUNDARIES)
 from graphics.window import Window
 from graphics.sprite_loader import SpriteLoader
 from graphics.renderer import BoardRenderer
@@ -39,18 +42,23 @@ def main():
     # Create a standard 8x8 chess board with starting position
     engine, board = build_game_engine_and_board()
     
-    mapper = BoardMapper(board.width, board.height)
+    mapper = BoardMapper(board.width, board.height,
+                         offset_x=BOARD_OFFSET_X, offset_y=BOARD_OFFSET_Y,
+                         col_boundaries=BOARD_COL_BOUNDARIES,
+                         row_boundaries=BOARD_ROW_BOUNDARIES)
     
     # Initialize UI components
     pieces_path = ui_dir / PIECES_PATH
     board_img_path = ui_dir / BOARD_IMAGE_PATH
     
     sprite_loader = SpriteLoader(pieces_path)
-    renderer = BoardRenderer(board, sprite_loader, str(board_img_path))
-    hud_renderer = HudRenderer(800, 800)
     
     # Game facade handles user clicks and motion prediction
     facade = GameFacade(engine, mapper)
+
+    renderer = BoardRenderer(board, sprite_loader, str(board_img_path), facade, mapper)
+    hud_renderer = HudRenderer(800, 800, player_white=PLAYER_WHITE, player_black=PLAYER_BLACK)
+    HudRenderer.set_pieces_dir(pieces_path)
     
     # Mouse input — double-click triggers jump, single click triggers move
     mouse_controller = MouseController(facade.request_click, facade.request_jump)
@@ -91,11 +99,14 @@ def main():
         
         # Render
         try:
+            renderer.set_selection(facade.get_selected_pos())
             board_frame = renderer.render(dt_ms)
             hud_renderer.set_moves(moves_log_panel.get_moves())
             hud_renderer.update_score(
                 white_score=score_panel.get_score(Color.WHITE),
                 black_score=score_panel.get_score(Color.BLACK),
+                white_captured=score_panel.get_captured(Color.WHITE),
+                black_captured=score_panel.get_captured(Color.BLACK),
             )
             full_frame = hud_renderer.render(board_frame)
         except Exception as e:

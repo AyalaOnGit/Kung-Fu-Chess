@@ -14,8 +14,8 @@ from graphics.sprite_loader import SpriteLoader, SpriteConfig, SpriteFrame
 class PieceAnimatorState(Enum):
     """Animation state of a piece."""
     IDLE = "idle"
-    MOVING = "moving"
-    JUMPING = "jumping"
+    MOVING = "move"
+    JUMPING = "jump"
     SHORT_REST = "short_rest"
     LONG_REST = "long_rest"
 
@@ -42,9 +42,9 @@ class PieceAnimator:
     _current_frames: Optional[list[SpriteFrame]] = field(default=None, init=False)
     
     def _piece_code(self) -> str:
-        """Return the piece code: e.g. QB (queen black), NW (knight white)."""
-        kind_char = self.piece.kind.value
-        color_char = self.piece.color.value
+        """Return the piece code matching the assets folder name: e.g. PW (pawn white), NB (knight black)."""
+        kind_char = self.piece.kind.value   # e.g. 'P', 'N', 'R', ...
+        color_char = self.piece.color.value.upper()  # 'w' -> 'W', 'b' -> 'B'
         return f"{kind_char}{color_char}"
     
     def _load_animation(self, state: PieceAnimatorState) -> None:

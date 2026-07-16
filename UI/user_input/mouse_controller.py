@@ -1,62 +1,44 @@
 """
-Mouse click handler: converts cv2 mouse events to server's Controller.
+Mouse click handler: converts cv2 mouse events to game commands.
 
-No rendering or game knowledge—just adapts click coordinates into
-the server's command interface.
-
-Double-click detection: two LEFT_BUTTON_DOWN events within DOUBLE_CLICK_MS
-milliseconds and DOUBLE_CLICK_RADIUS pixels of each other trigger a jump.
+Double-click = two clicks on the SAME cell within DOUBLE_CLICK_MS → jump.
+After a completed move (src→dst), the timer resets so the next click
+on any cell starts fresh and cannot accidentally trigger a jump.
 """
 from __future__ import annotations
 from typing import Callable, Optional
 import time
 import cv2
 
-# Maximum gap between two clicks to count as a double-click (ms)
-DOUBLE_CLICK_MS = 300
-# Maximum pixel distance between the two clicks
-DOUBLE_CLICK_RADIUS = 20
+DOUBLE_CLICK_MS     = 300   # ms between two clicks to count as double-click
+DOUBLE_CLICK_RADIUS = 20    # max pixel distance between the two clicks
 
 
 class MouseController:
     """
-    Routes cv2 mouse callbacks into the server's Controller.
+    Routes cv2 mouse callbacks to click_handler / jump_handler.
 
-    Responsibilities:
-      - Adapt cv2 mouse callback format to Controller.on_click / on_jump
-      - Detect double-click (same position, within time threshold) → jump
-      - Single left-click → normal move
-      - Ignore right-click, movement, etc.
+    State machine:
+      IDLE                → LEFT_DOWN on A            → SELECTED(A, t)
+      SELECTED(A, t)      → LEFT_DOWN on A within 300ms → JUMP(A) → IDLE
+      SELECTED(A, t)      → LEFT_DOWN on B (different)  → MOVE(A→B) → IDLE
+      SELECTED(A, t)      → LEFT_DOWN on A after 300ms  → SELECTED(A, t2)
     """
 
-    def __init__(
-        self,
-        click_handler: Callable[[int, int], None],
-        jump_handler: Optional[Callable[[int, int], None]] = None,
-    ):
+    def __init__(self,
+                 click_handler: Callable[[int, int], bool],
+                 jump_handler: Optional[Callable[[int, int], None]] = None):
         self._click_handler = click_handler
-        self._jump_handler = jump_handler
+        self._jump_handler  = jump_handler
+        self._last_time_ms: float = 0.0
+        self._last_x: int = -9999
+        self._last_y: int = -9999
 
-        # State for double-click detection
-        self._last_click_time_ms: float = 0.0
-        self._last_click_x: int = 0
-        self._last_click_y: int = 0
-
-    def on_mouse_event(self, event: int, x: int, y: int, flags: int, param: None) -> None:
-        """
-        cv2 mouse callback adapter.
-
-        :param event: cv2 mouse event type
-        :param x: pixel x coordinate
-        :param y: pixel y coordinate
-        :param flags: cv2 flags (shift, ctrl, etc.)
-        :param param: user-provided param (unused)
-        """
+    def on_mouse_event(self, event: int, x: int, y: int, flags: int, param) -> None:
+        # Native OS double-click (Windows fires this reliably)
         if event == cv2.EVENT_LBUTTONDBLCLK:
-            # cv2 on Windows fires a native double-click event — use it directly
-            self._last_click_time_ms = 0.0  # reset so next click is fresh
-            print(f"[mouse] native double-click at ({x}, {y})")
-            if self._jump_handler is not None:
+            self._reset()
+            if self._jump_handler:
                 self._jump_handler(x, y)
             return
 
@@ -64,25 +46,30 @@ class MouseController:
             return
 
         now_ms = time.monotonic() * 1000.0
-        dt_ms = now_ms - self._last_click_time_ms
-        dx = abs(x - self._last_click_x)
-        dy = abs(y - self._last_click_y)
+        dt     = now_ms - self._last_time_ms
+        dx     = abs(x - self._last_x)
+        dy     = abs(y - self._last_y)
 
-        is_double = (
-            dt_ms <= DOUBLE_CLICK_MS
-            and dx <= DOUBLE_CLICK_RADIUS
-            and dy <= DOUBLE_CLICK_RADIUS
-        )
+        same_spot = dx <= DOUBLE_CLICK_RADIUS and dy <= DOUBLE_CLICK_RADIUS
+        fast      = dt <= DOUBLE_CLICK_MS
 
-        if is_double:
-            # Reset so a triple-click doesn't fire a second jump
-            self._last_click_time_ms = 0.0
-            print(f"[mouse] double-click at ({x}, {y}) dt={dt_ms:.0f}ms")
-            if self._jump_handler is not None:
+        if same_spot and fast:
+            # Two rapid clicks on same spot → jump
+            self._reset()
+            if self._jump_handler:
                 self._jump_handler(x, y)
         else:
-            # Record this click and forward as a normal move click
-            self._last_click_time_ms = now_ms
-            self._last_click_x = x
-            self._last_click_y = y
-            self._click_handler(x, y)
+            is_dest_click = self._click_handler(x, y)
+            if is_dest_click:
+                # Was a src→dst click — reset fully, next click starts fresh
+                self._reset()
+            else:
+                # Was a selection click (1st click) — record NOW for double-click detection
+                self._last_time_ms = now_ms
+                self._last_x = x
+                self._last_y = y
+
+    def _reset(self) -> None:
+        self._last_time_ms = 0.0
+        self._last_x = -9999
+        self._last_y = -9999

@@ -86,6 +86,22 @@ class Img:
                     cv2.FONT_HERSHEY_SIMPLEX, font_size,
                     color, thickness, cv2.LINE_AA)
 
+    def draw_rect(self, x1: int, y1: int, x2: int, y2: int,
+                   color: tuple, thickness: int = 1) -> "Img":
+        """Draw a rectangle on self.img."""
+        if self.img is None:
+            raise ValueError("Image not loaded.")
+        cv2.rectangle(self.img, (x1, y1), (x2, y2), color, thickness)
+        return self
+
+    def draw_line(self, x1: int, y1: int, x2: int, y2: int,
+                  color: tuple, thickness: int = 1) -> "Img":
+        """Draw a line on self.img."""
+        if self.img is None:
+            raise ValueError("Image not loaded.")
+        cv2.line(self.img, (x1, y1), (x2, y2), color, thickness)
+        return self
+
     def show(self):
         if self.img is None:
             raise ValueError("Image not loaded.")

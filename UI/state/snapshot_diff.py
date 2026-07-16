@@ -6,6 +6,7 @@ not a point-in-time copy. We freeze snapshots here to fix that bug,
 then diff them to infer events (piece arrived, captured, halted, etc.)
 """
 from __future__ import annotations
+import copy
 from dataclasses import dataclass
 from typing import Optional
 from kungfu_chess.model.board import Board
@@ -31,8 +32,6 @@ class FrozenSnapshot:
         # Deep copy the grid
         pieces_copy = {}
         for pos, piece in board._grid.items():
-            # Copy the piece data
-            import copy
             pieces_copy[pos] = copy.deepcopy(piece)
         
         return FrozenSnapshot(pieces=pieces_copy, game_over=game_over)

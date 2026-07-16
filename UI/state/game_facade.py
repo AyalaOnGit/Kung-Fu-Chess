@@ -37,7 +37,8 @@ class PendingMotionData:
     src_pos: Position
     dst_pos: Position
     is_jump: bool
-    motion_end_time_ms: float  # clock_ms when motion will finish
+    motion_start_time_ms: float  # clock_ms when motion began
+    motion_end_time_ms: float    # clock_ms when motion will finish
 
 
 class GameFacade:
@@ -92,45 +93,47 @@ class GameFacade:
         result = self._controller.on_jump(x, y)
         print(f"[jump] {piece.token()} at {pos} → accepted={result.is_accepted if result else 'n/a'} reason={result.reason if result else 'n/a'}")
         # Track the jump as a pending motion so animations resolve correctly
+        now = self._engine.clock_ms
         self._pending_motions[piece.id] = PendingMotionData(
             piece=piece,
             src_pos=pos,
             dst_pos=pos,
             is_jump=True,
-            motion_end_time_ms=self._engine.clock_ms + JUMP_DURATION_MS,
+            motion_start_time_ms=now,
+            motion_end_time_ms=now + JUMP_DURATION_MS,
         )
 
-    def request_click(self, x: int, y: int) -> None:
+    def request_click(self, x: int, y: int) -> bool:
         """
         Route a mouse click to the controller.
-        
-        :param x: pixel x coordinate
-        :param y: pixel y coordinate
+
+        :return: True if this was a destination click (2nd click, src→dst attempt).
+                 False if it was a selection click (1st click) or out-of-bounds.
         """
         result, src, dst = self._controller.on_click(x, y)
         if result is None:
-            return
+            # First click (selection) — NOT a completed move attempt
+            return False
+        # Second click (destination) — move was attempted (accepted or rejected)
         command_result, src_pos, dst_pos, piece = result
         if command_result.is_accepted and piece is not None:
-            # Publish the accepted move immediately for UI feedback
             self._subject.publish(MoveAccepted(piece=piece, src_pos=src_pos, dst_pos=dst_pos))
-            # Track the motion so we can diff the board and detect captures when it completes
             motion_duration_ms = self._calculate_motion_duration(src_pos, dst_pos)
+            now = self._engine.clock_ms
             self._pending_motions[piece.id] = PendingMotionData(
                 piece=piece,
                 src_pos=src_pos,
                 dst_pos=dst_pos,
                 is_jump=False,
-                motion_end_time_ms=self._engine.clock_ms + motion_duration_ms,
+                motion_start_time_ms=now,
+                motion_end_time_ms=now + motion_duration_ms,
             )
+        return True
 
     def _calculate_motion_duration(self, src_pos: Position, dst_pos: Position) -> float:
         """Calculate motion duration in milliseconds for a move."""
-        distance_cells = abs(dst_pos.col - src_pos.col)
-        if distance_cells == 0:
-            distance_cells = abs(dst_pos.row - src_pos.row)
-        distance_px = distance_cells * CELL_SIZE_PX
-        return (distance_px / PIECE_SPEED_PPS) * 1000.0
+        distance_cells = max(abs(dst_pos.col - src_pos.col), abs(dst_pos.row - src_pos.row))
+        return distance_cells * (CELL_SIZE_PX * 1000.0 / PIECE_SPEED_PPS)
     
     # --- Core loop ---
     
@@ -153,15 +156,29 @@ class GameFacade:
         """
         current_time = self._engine.clock_ms
         completed_ids = []
-        
+
         for piece_id, motion_data in self._pending_motions.items():
             if current_time >= motion_data.motion_end_time_ms:
                 completed_ids.append(piece_id)
-        
+            elif not motion_data.is_jump:
+                # The server may have stopped the piece early (blocked by friendly).
+                # If the piece's actual board position differs from dst_pos, update
+                # dst_pos so the animation lerps to the real landing cell.
+                actual_pos = motion_data.piece.cell
+                if actual_pos != motion_data.dst_pos and actual_pos != motion_data.src_pos:
+                    motion_data.dst_pos = actual_pos
+                    # Shorten the animation: recalculate end time based on real distance
+                    real_duration = self._calculate_motion_duration(
+                        motion_data.src_pos, actual_pos
+                    )
+                    motion_data.motion_end_time_ms = (
+                        motion_data.motion_start_time_ms + real_duration
+                    )
+
         # Remove completed
         for piece_id in completed_ids:
             del self._pending_motions[piece_id]
-        
+
         # If any motions completed, diff the board
         if completed_ids:
             self._diff_and_publish_events()
@@ -203,37 +220,48 @@ class GameFacade:
         self._last_snapshot = current_snapshot
     
     # --- Motion prediction ---
-    
-    def get_pending_motion(self, piece_id: int) -> Optional[PixelMotion]:
+
+    def get_selected_pos(self) -> Optional[Position]:
+        """Return the currently selected cell, or None."""
+        return self._controller.selected
+
+    def get_cooldown_ratio(self, piece: Piece) -> float:
         """
-        Get motion data for a piece currently in flight.
-        
+        Return fraction of cooldown remaining for a piece in COOLING state (1.0=just started, 0.0=done).
+        Returns 0.0 if the piece is not cooling.
+        """
+        return self._engine.get_cooldown_ratio(piece)
+    
+    def get_pending_motion(self, piece_id: int) -> Optional[tuple[PixelMotion, float]]:
+        """
+        Get motion data and elapsed time for a piece currently in flight.
+
         :param piece_id: the piece's id
-        :return: PixelMotion or None if not in flight
+        :return: (PixelMotion, elapsed_ms) or None if not in flight
         """
         motion_data = self._pending_motions.get(piece_id)
         if not motion_data:
             return None
-        
-        # Calculate pixel coordinates
-        src_px_x = motion_data.src_pos.col * CELL_SIZE_PX + CELL_SIZE_PX // 2
-        src_px_y = motion_data.src_pos.row * CELL_SIZE_PX + CELL_SIZE_PX // 2
-        dst_px_x = motion_data.dst_pos.col * CELL_SIZE_PX + CELL_SIZE_PX // 2
-        dst_px_y = motion_data.dst_pos.row * CELL_SIZE_PX + CELL_SIZE_PX // 2
-        
+
+        elapsed_ms = self._engine.clock_ms - motion_data.motion_start_time_ms
+
+        # src/dst as center-of-cell pixels (with board border offset)
+        src_px_x, src_px_y = self._mapper.cell_center_pixel(motion_data.src_pos)
+        dst_px_x, dst_px_y = self._mapper.cell_center_pixel(motion_data.dst_pos)
+
         if motion_data.is_jump:
-            duration_ms = JUMP_DURATION_MS
+            duration_ms = float(JUMP_DURATION_MS)
         else:
-            # Calculate based on distance
-            distance_cells = abs(motion_data.dst_pos.col - motion_data.src_pos.col)
-            if distance_cells == 0:
-                distance_cells = abs(motion_data.dst_pos.row - motion_data.src_pos.row)
-            
+            distance_cells = max(
+                abs(motion_data.dst_pos.col - motion_data.src_pos.col),
+                abs(motion_data.dst_pos.row - motion_data.src_pos.row),
+            )
             distance_px = distance_cells * CELL_SIZE_PX
-            duration_ms = (distance_px / PIECE_SPEED_PPS) * 1000
-        
-        return PixelMotion(
+            duration_ms = (distance_px / PIECE_SPEED_PPS) * 1000.0
+
+        pixel_motion = PixelMotion(
             src_px=(src_px_x, src_px_y),
             dst_px=(dst_px_x, dst_px_y),
-            duration_ms=duration_ms
+            duration_ms=duration_ms,
         )
+        return pixel_motion, elapsed_ms

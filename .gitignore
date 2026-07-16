@@ -1,15 +1,3 @@
-__pycache__/
-*.py[cod]
-.pytest_cache/
-venv/
-.venv/
-.env
-.idea/
-.vscode/
-.DS_Store
-Thumbs.db
-htmlcov/
-.coverage
 # Python
 __pycache__/
 *.py[cod]
@@ -40,3 +28,16 @@ coverage.xml
 # OS
 .DS_Store
 Thumbs.db
+
+# Debug / scratch scripts
+check_blocking.py
+check_blocking2.py
+check_blocking3.py
+check_blocking4.py
+check_pathblock.py
+check_sizes.py
+UI/check_render_now.py
+UI/check_sizes.py
+UI/test_current.png
+UI/tmp.txt
+Server/tmp.txt

@@ -39,18 +39,25 @@ class Controller:
                 self._selected = pos
             return None, None, None
         else:
-            clicked = self._engine.board.piece_at(pos)
+            clicked        = self._engine.board.piece_at(pos)
             selected_piece = self._engine.board.piece_at(self._selected)
-            if clicked is not None and selected_piece is not None and clicked.color == selected_piece.color:
+
+            # Re-select only if: clicked a friendly piece AND the original
+            # selected piece is still on the board (not in-flight).
+            if (clicked is not None
+                    and selected_piece is not None
+                    and clicked.color == selected_piece.color):
                 self._selected = pos
                 return None, None, None
-            else:
-                piece = self._engine.board.piece_at(self._selected)
-                result = self._engine.execute(MoveCommand(self._selected, pos))
-                src = self._selected
-                dst = pos
-                self._selected = None
-                return (result, src, dst, piece), src, dst
+
+            # Otherwise: attempt the move (covers enemy target, empty target,
+            # and the case where the selected piece already flew away).
+            piece  = selected_piece  # may be None if piece is in-flight
+            result = self._engine.execute(MoveCommand(self._selected, pos))
+            src    = self._selected
+            dst    = pos
+            self._selected = None
+            return (result, src, dst, piece), src, dst
 
     def on_jump(self, x: int, y: int):
         """Process a jump command at pixel (x, y). Returns CommandResult."""

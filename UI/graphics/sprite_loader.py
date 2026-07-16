@@ -12,7 +12,6 @@ from typing import Optional
 import cv2
 import numpy as np
 
-
 @dataclass
 class SpriteConfig:
     """Configuration for a piece state's animation."""
@@ -109,6 +108,7 @@ class SpriteLoader:
             img = cv2.imread(str(sprite_file), cv2.IMREAD_UNCHANGED)
             if img is None:
                 raise FileNotFoundError(f"Cannot load sprite: {sprite_file}")
+            img = self._crop_to_content(img)
             frames.append(SpriteFrame(image=img, duration_ms=frame_ms))
         
         if not frames:
@@ -117,6 +117,28 @@ class SpriteLoader:
         self._cache[key] = frames
         return frames
     
+    @staticmethod
+    def _crop_to_content(img: np.ndarray) -> np.ndarray:
+        """
+        Crop image to the tight bounding box of non-transparent pixels.
+        If the image has no alpha channel or all pixels are opaque, returns as-is.
+        """
+        if img.ndim < 3 or img.shape[2] < 4:
+            return img
+        alpha = img[:, :, 3]
+        rows = np.any(alpha > 10, axis=1)
+        cols = np.any(alpha > 10, axis=0)
+        if not rows.any():
+            return img
+        rmin, rmax = np.where(rows)[0][[0, -1]]
+        cmin, cmax = np.where(cols)[0][[0, -1]]
+        # Add a small 2px padding so edges aren't clipped
+        rmin = max(0, rmin - 2)
+        rmax = min(img.shape[0] - 1, rmax + 2)
+        cmin = max(0, cmin - 2)
+        cmax = min(img.shape[1] - 1, cmax + 2)
+        return img[rmin:rmax + 1, cmin:cmax + 1]
+
     def get_config(self, piece_code: str, state: str) -> SpriteConfig:
         """
         Get animated config for a piece state.

@@ -3,8 +3,8 @@ from typing import Callable, Optional
 from kungfu_chess.model.board import Board
 from kungfu_chess.model.piece import Piece, PieceState
 from kungfu_chess.model.position import Position
-from kungfu_chess.realtime.motion import Motion, JumpMotion, CooldownTimer, travel_duration_ms
-from kungfu_chess.config import JUMP_DURATION_MS, COOLDOWN_MS
+from kungfu_chess.realtime.motion import Motion, JumpMotion, CooldownTimer, travel_duration_ms, compute_path
+from kungfu_chess.config import JUMP_DURATION_MS, COOLDOWN_MS, CELL_SIZE_PX, PIECE_SPEED_PPS
 
 
 class RealTimeArbiter:
@@ -72,6 +72,37 @@ class RealTimeArbiter:
             dest=dest,
             arrival_time=self._clock_ms + duration,
         ))
+
+    def get_active_motions(self) -> list[Motion]:
+        """Return a read-only view of all currently active motions."""
+        return list(self._motions)
+
+    def redirect_motion(self, motion: Motion, new_dest: Position) -> None:
+        """
+        Shorten an in-flight motion to new_dest.
+
+        Recalculates arrival_time proportionally so the piece keeps its
+        current speed — it doesn't suddenly teleport or slow down.
+        new_dest must lie on the original path between the piece's current
+        position and the original dest.
+        """
+        old_steps = max(
+            abs(motion.dest.row - motion.src.row),
+            abs(motion.dest.col - motion.src.col),
+        )
+        new_steps = max(
+            abs(new_dest.row - motion.src.row),
+            abs(new_dest.col - motion.src.col),
+        )
+        if old_steps == 0:
+            return
+        # Scale arrival_time: start_time + (new_steps/old_steps) * total_duration
+        total_duration = old_steps * (CELL_SIZE_PX * 1000 // PIECE_SPEED_PPS)
+        start_time = motion.arrival_time - total_duration
+        new_duration = new_steps * (CELL_SIZE_PX * 1000 // PIECE_SPEED_PPS)
+        motion.dest = new_dest
+        motion.arrival_time = start_time + new_duration
+        motion.path = compute_path(motion.src, new_dest)
 
     def start_jump(self, piece: Piece) -> None:
         """
