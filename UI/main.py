@@ -34,7 +34,7 @@ from ui_components.halt_flash import HaltFlashTracker
 from kungfu_chess.model.piece import Color
 
 from kungfu_chess.factory import build_engine
-from kungfu_chess.io.board_parser import parse_board
+from kungfu_chess.io.board_factory import standard_board
 from kungfu_chess.input.board_mapper import BoardMapper
 
 
@@ -160,19 +160,7 @@ def build_game_engine_and_board():
 
     Returns (engine, board)
     """
-    # Standard chess starting position
-    starting_position = [
-        "bR bN bB bQ bK bB bN bR",
-        "bP bP bP bP bP bP bP bP",
-        ".  .  .  .  .  .  .  .  ",
-        ".  .  .  .  .  .  .  .  ",
-        ".  .  .  .  .  .  .  .  ",
-        ".  .  .  .  .  .  .  .  ",
-        "wP wP wP wP wP wP wP wP",
-        "wR wN wB wQ wK wB wN wR",
-    ]
-
-    board = parse_board(starting_position)
+    board = standard_board()
     engine = build_engine(board)
     return engine, board
 

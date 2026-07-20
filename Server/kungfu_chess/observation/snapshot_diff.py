@@ -1,9 +1,10 @@
 """
 Snapshot diffing: compare engine snapshots to detect game events.
 
-The server's GameEngine.snapshot() returns a live view over the board,
-not a point-in-time copy. We freeze snapshots here to fix that bug,
-then diff them to infer events (piece arrived, captured, halted, etc.)
+GameEngine.board is a live view over the board, not a point-in-time copy —
+it keeps mutating as the engine advances. We freeze snapshots here to get
+a stable point-in-time copy, then diff them to infer events (piece
+arrived, captured, halted, etc.). GameEngine itself emits no events.
 """
 from __future__ import annotations
 import copy
@@ -18,10 +19,10 @@ from kungfu_chess.model.position import Position
 class FrozenSnapshot:
     """
     Point-in-time copy of a board state.
-    
+
     Freezes the board so we can diff against it later without the snapshot
-    changing when the engine advances. (The engine's snapshot() returns a live
-    view, not a copy.)
+    changing when the engine advances. (GameEngine.board is a live view,
+    not a copy.)
     """
     pieces: dict[Position, Piece]  # Frozen copy of board._grid
     game_over: bool

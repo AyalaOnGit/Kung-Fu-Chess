@@ -20,6 +20,9 @@ htmlcov/
 .coverage
 coverage.xml
 
+# Local runtime data
+*.db
+
 # IDEs
 .vscode/
 .idea/

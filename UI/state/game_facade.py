@@ -26,7 +26,7 @@ from state.game_events import (
     MoveAccepted, MoveRejected, PieceArrived, PieceCaptured,
     PieceHalted, Promotion, GameOver, GameEvent
 )
-from state.snapshot_diff import FrozenSnapshot, diff_snapshots
+from kungfu_chess.observation.snapshot_diff import FrozenSnapshot, diff_snapshots
 from animation.motion_predictor import PixelMotion, duration_for_move_ms
 
 
