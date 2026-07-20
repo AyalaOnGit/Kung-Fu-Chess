@@ -7,18 +7,19 @@ from typing import Optional
 
 class Role(Enum):
     """
-    A connected client's role in the match.
+    A connected client's role within whatever room it belongs to.
 
-    Only WHITE/BLACK exist through Phase 1-4. VIEWER is added in Phase 5
-    (game/rooms.py) — no phase before that may reference a spectator concept.
+    VIEWER exists from Phase 5 on (game/rooms.py) — no phase before that
+    may reference a spectator concept.
 
     can_move is written as "is this one of the playing colors" rather than
-    "is this not VIEWER" specifically so game/commands.py's viewer gate can
-    be written once, now, and never touched again once Phase 5 adds VIEWER —
-    it doesn't need to name a role that doesn't exist yet.
+    "is this not VIEWER" — written that way back in Phase 1, before VIEWER
+    existed, specifically so game/commands.py's viewer gate would need no
+    changes once this enum grew a third member. It didn't.
     """
     WHITE = 'white'
     BLACK = 'black'
+    VIEWER = 'viewer'
 
     @property
     def can_move(self) -> bool:
@@ -30,20 +31,24 @@ class ClientSession:
     """
     One connected client.
 
-    role starts unset (None) at connect time (Phase 3 on): a session is
-    only ever a WHITE/BLACK player once the matchmaker pairs it with an
-    opponent (matchmaking/matchmaker_loop.py), and goes back to None once
-    that match ends. No client message ever sets or spoofs it directly —
-    it's server logic alone, same anchor fact as before, just assigned
-    later than connection time now instead of at it.
+    room_id/role start unset (None) at connect time and are only ever set
+    together, by server logic alone — never by a client message:
+      - matchmaking/matchmaker_loop.py's on_paired sets both when it pairs
+        two queued players into a new Room (WHITE/BLACK).
+      - network/dispatch.py's create_room/join_room handlers set both when
+        a session manually creates or joins a room by id (WHITE, BLACK, or
+        VIEWER depending on join order).
+    Both go back to None once the room's game ends.
 
     user_id/username start unset and are filled in by a successful
     'register'/'login' (network/dispatch.py) — gates in front of queueing
-    (queue_join requires user_id is not None), not a replacement for it.
+    and room-joining (both require user_id is not None), not a replacement
+    for them.
     """
     session_id: str
     websocket: object
     role: Optional[Role] = None
+    room_id: Optional[str] = None
     user_id: Optional[int] = None
     username: Optional[str] = None
 

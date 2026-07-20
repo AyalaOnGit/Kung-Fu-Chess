@@ -12,7 +12,8 @@ import game.engine_path  # noqa: F401  (must run before any kungfu_chess import)
 
 from typing import Any, Dict, Optional, Tuple
 
-from kungfu_chess.model.piece import Piece
+from kungfu_chess.engine.game_engine import GameEngine
+from kungfu_chess.model.piece import Piece, PieceState
 from kungfu_chess.model.position import Position
 
 from game.events import (
@@ -56,3 +57,34 @@ def to_wire(event: GameEvent) -> Tuple[str, Dict[str, Any]]:
     if isinstance(event, GameOver):
         return 'game_over', {'winner': event.winner.value, 'loser': event.loser.value}
     raise ValueError(f'unknown game event type: {type(event)!r}')
+
+
+def state_sync_payload(engine: GameEngine) -> Dict[str, Any]:
+    """
+    Serialize enough of engine's current state for a reconnecting client to
+    redraw the board (§5 Phase 4 point 3): every piece's id/color/kind/cell/
+    state, plus cooldown_ratio for pieces currently cooling, game_over, and
+    clock_ms.
+
+    Deliberately does not include in-flight motion vectors (src/dest/eta
+    for pieces mid-MOVING or mid-JUMPING) — GameEngine has no public read
+    for that (only kungfu_chess's internal RealTimeArbiter does, via a
+    private attribute), and adding one wasn't judged worth an additive
+    kungfu_chess change for this. A piece still travelling shows at its
+    pre-motion position with state 'moving'/'jumping' until the next
+    piece_arrived/piece_captured broadcast corrects it — at most a few
+    seconds later given kungfu_chess.config's travel/jump durations.
+    """
+    return {
+        'pieces': [_piece_state(engine, piece) for piece in engine.board.all_pieces()],
+        'game_over': engine.game_over,
+        'clock_ms': engine.clock_ms,
+    }
+
+
+def _piece_state(engine: GameEngine, piece: Piece) -> Dict[str, Any]:
+    entry = _piece(piece)
+    entry['state'] = piece.state.value
+    if piece.state is PieceState.COOLING:
+        entry['cooldown_ratio'] = engine.get_cooldown_ratio(piece)
+    return entry

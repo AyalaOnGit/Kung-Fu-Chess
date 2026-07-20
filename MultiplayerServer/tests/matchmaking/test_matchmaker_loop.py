@@ -16,10 +16,10 @@ async def _noop_timeout(_user_id):
 
 
 def _loop(queue=None, clock=None, on_paired=_noop_paired, on_timeout=_noop_timeout,
-          is_match_in_progress=lambda: False, poll_interval_seconds=0.02):
+          poll_interval_seconds=0.02):
     clock = clock or FakeClock()
     queue = queue if queue is not None else MatchmakingQueue(clock=clock)
-    return MatchmakerLoop(queue, clock, on_paired, on_timeout, is_match_in_progress, poll_interval_seconds)
+    return MatchmakerLoop(queue, clock, on_paired, on_timeout, poll_interval_seconds)
 
 
 async def _poll_until(predicate, attempts=75, interval=0.02):
@@ -29,7 +29,7 @@ async def _poll_until(predicate, attempts=75, interval=0.02):
         await asyncio.sleep(interval)
 
 
-# --- lifecycle (mirrors game/match.py's MatchSession tests) ---
+# --- lifecycle (mirrors game/rooms.py's Room tests) ---
 
 @pytest.mark.asyncio
 async def test_start_marks_the_loop_running():
@@ -107,26 +107,29 @@ async def test_pairs_two_queued_players_within_elo_range():
 
 
 @pytest.mark.asyncio
-async def test_does_not_pair_while_a_match_is_in_progress():
+async def test_pairs_multiple_groups_concurrently_in_one_poll():
+    # Phase 5 removed the Phase 1-4 single-match-slot limit (game/rooms.py
+    # supports many concurrent rooms), so a poll with two eligible pairs
+    # queued should pair both, not just one.
     clock = FakeClock()
     queue = MatchmakingQueue(clock=clock, elo_range=1000)
-    queue.enqueue(user_id=1, elo=1200)
-    queue.enqueue(user_id=2, elo=1200)
+    for user_id in (1, 2, 3, 4):
+        queue.enqueue(user_id=user_id, elo=1200)
 
     paired = []
 
     async def on_paired(white_id, black_id):
         paired.append((white_id, black_id))
 
-    loop = _loop(queue=queue, clock=clock, on_paired=on_paired, is_match_in_progress=lambda: True)
+    loop = _loop(queue=queue, clock=clock, on_paired=on_paired)
     try:
         loop.start()
-        await asyncio.sleep(0.15)  # several polls' worth
+        await _poll_until(lambda: len(paired) == 2)
     finally:
         await loop.stop()
 
-    assert paired == []
-    assert 1 in queue and 2 in queue
+    assert len(paired) == 2
+    assert len(queue) == 0
 
 
 @pytest.mark.asyncio

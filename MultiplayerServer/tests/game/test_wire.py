@@ -2,9 +2,12 @@ import json
 
 import pytest
 
+from game.engine_factory import build_game_stack
 from game.events import GameOver, JumpAccepted, MoveAccepted, PieceArrived, PieceCaptured, Promotion
-from game.wire import to_wire
+from game.wire import state_sync_payload, to_wire
 
+from kungfu_chess.engine.commands import MoveCommand
+from kungfu_chess.model.board import Board
 from kungfu_chess.model.piece import Piece, Color, Kind
 from kungfu_chess.model.position import Position
 
@@ -93,3 +96,50 @@ def test_game_over_to_wire():
 def test_unknown_event_type_raises():
     with pytest.raises(ValueError):
         to_wire(object())
+
+
+# --- state_sync_payload ---
+
+def _board_with_a_rook() -> Board:
+    board = Board(width=8, height=8)
+    board.add_piece(Piece(id=1, color=Color.WHITE, kind=Kind.KING, cell=Position(7, 7)))
+    board.add_piece(Piece(id=2, color=Color.BLACK, kind=Kind.KING, cell=Position(7, 0)))
+    board.add_piece(Piece(id=3, color=Color.WHITE, kind=Kind.ROOK, cell=Position(0, 0)))
+    return board
+
+
+def test_state_sync_payload_includes_every_piece_and_top_level_fields():
+    engine = build_game_stack(_board_with_a_rook())
+
+    payload = state_sync_payload(engine)
+
+    assert payload['game_over'] is False
+    assert payload['clock_ms'] == 0
+    assert len(payload['pieces']) == 3
+    rook = next(p for p in payload['pieces'] if p['kind'] == 'R')
+    assert rook == {'id': 3, 'color': 'w', 'kind': 'R', 'cell': [0, 0], 'state': 'idle'}
+    _assert_json_safe(payload)
+
+
+def test_state_sync_payload_includes_cooldown_ratio_only_for_cooling_pieces():
+    engine = build_game_stack(_board_with_a_rook())
+    engine.execute(MoveCommand(Position(0, 0), Position(0, 3)))
+    engine.wait(3000)  # completes the move, piece enters cooldown
+
+    payload = state_sync_payload(engine)
+
+    rook = next(p for p in payload['pieces'] if p['kind'] == 'R')
+    assert rook['state'] == 'cooling'
+    assert 0.0 <= rook['cooldown_ratio'] <= 1.0
+
+    king = next(p for p in payload['pieces'] if p['id'] == 1)
+    assert king['state'] == 'idle'
+    assert 'cooldown_ratio' not in king
+    _assert_json_safe(payload)
+
+
+def test_state_sync_payload_reflects_game_over():
+    engine = build_game_stack(_board_with_a_rook())
+    engine.force_game_over()
+
+    assert state_sync_payload(engine)['game_over'] is True

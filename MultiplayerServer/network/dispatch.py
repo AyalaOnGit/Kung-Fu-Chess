@@ -3,45 +3,54 @@ Command Pattern: envelope['type'] -> registered async handler. Adding a
 wire command means registering one function in _HANDLERS, never editing a
 branch chain.
 
-Three responsibilities live here, all at the network/game seam:
-  - build_dispatcher: routes an incoming raw message to game/commands.py
-    (via the currently active MatchSession, if any) or auth/service.py
-    (via UsersRepository) or matchmaking/queue.py, and returns the direct
-    response for the sender alone.
-  - build_broadcaster: subscribes to the match's Bus topic and fans every
-    accepted game event out to all connected sessions.
+build_dispatcher routes an incoming raw message to game/rooms.py (via the
+session's room_id, if any), auth/service.py, matchmaking/queue.py, or
+resilience/reconnect_state.py, and returns the direct response for the
+sender alone. Room-scoped broadcasting itself lives in game/rooms.py now
+(RoomManager wires it per-room at create_room/end_room) — this module
+used to own a single build_broadcaster for the one Phase 1-4 match slot,
+but that doesn't generalize to "however many rooms happen to exist."
 
-The active match changes over a process's lifetime (Phase 3 on: created
-per pairing, torn down at game-over) — get_current_match is a callable
-rather than a fixed MatchSession so the dispatcher always sees the live
-one instead of a stale reference captured once at startup.
+Every handler takes the same (session, ctx: DispatchContext, data) shape
+even though most fields of ctx go unused by any given handler — this
+bundle replaced a growing list of positional parameters (which had grown
+across three phases: match, then +users_repo, then +matchmaking_queue,
+then +reconnect_state) once that growth stopped being manageable as
+separate arguments.
 
-Neither function imports kungfu_chess directly — game/wire.py (§1: "the
-only package that imports kungfu_chess is game/") does the translation
-from game events to JSON-safe dicts, so this module only ever handles
-plain str/dict/Envelope values.
+This module still never imports kungfu_chess directly — game/wire.py
+(§1: "the only package that imports kungfu_chess is game/") does the
+translation from game events/engine state to JSON-safe dicts.
 """
 from __future__ import annotations
 import logging
+from dataclasses import dataclass
 from typing import Awaitable, Callable, Dict, Optional
 
-from websockets.exceptions import ConnectionClosed
-
 from auth import service as auth_service
-from core.bus import AsyncMessageBus, Unsubscribe
 from core.protocol import ErrorCode, Envelope, MalformedEnvelopeError, decode, encode
 from db.users_repository import UsersRepository
 from game.commands import HandleResult
-from game.match import MatchSession
-from game.wire import to_wire
+from game.rooms import RoomManager
+from game.wire import state_sync_payload
 from matchmaking.queue import MatchmakingQueue
-from network.session import ClientSession
+from network.session import ClientSession, Role
 from network.server import SessionManager
+from resilience.reconnect_state import ReconnectState
 
 logger = logging.getLogger(__name__)
 
-GetCurrentMatch = Callable[[], Optional[MatchSession]]
-Handler = Callable[[ClientSession, GetCurrentMatch, UsersRepository, MatchmakingQueue, dict], Awaitable[Envelope]]
+
+@dataclass(frozen=True)
+class DispatchContext:
+    room_manager: RoomManager
+    session_manager: SessionManager
+    users_repo: UsersRepository
+    matchmaking_queue: MatchmakingQueue
+    reconnect_state: ReconnectState
+
+
+Handler = Callable[[ClientSession, DispatchContext, dict], Awaitable[Envelope]]
 
 
 def _result_envelope(result: HandleResult) -> Envelope:
@@ -54,25 +63,22 @@ def _error(code: ErrorCode) -> Envelope:
     return Envelope(type='error', data={'code': code.value})
 
 
-async def _handle_ping(_session: ClientSession, _get_match: GetCurrentMatch,
-                        _users_repo: UsersRepository, _queue: MatchmakingQueue, _data: dict) -> Envelope:
+async def _handle_ping(_session: ClientSession, _ctx: DispatchContext, _data: dict) -> Envelope:
     return Envelope(type='pong', data={})
 
 
-async def _handle_move(session: ClientSession, get_match: GetCurrentMatch,
-                        _users_repo: UsersRepository, _queue: MatchmakingQueue, data: dict) -> Envelope:
-    match = get_match()
-    if match is None:
+async def _handle_move(session: ClientSession, ctx: DispatchContext, data: dict) -> Envelope:
+    room = ctx.room_manager.get(session.room_id) if session.room_id is not None else None
+    if room is None:
         return _error(ErrorCode.NOT_IN_A_MATCH)
-    return _result_envelope(match.handle_move(session, data))
+    return _result_envelope(room.handle_move(session, data))
 
 
-async def _handle_jump(session: ClientSession, get_match: GetCurrentMatch,
-                        _users_repo: UsersRepository, _queue: MatchmakingQueue, data: dict) -> Envelope:
-    match = get_match()
-    if match is None:
+async def _handle_jump(session: ClientSession, ctx: DispatchContext, data: dict) -> Envelope:
+    room = ctx.room_manager.get(session.room_id) if session.room_id is not None else None
+    if room is None:
         return _error(ErrorCode.NOT_IN_A_MATCH)
-    return _result_envelope(match.handle_jump(session, data))
+    return _result_envelope(room.handle_jump(session, data))
 
 
 def _credentials(data: dict):
@@ -83,13 +89,12 @@ def _credentials(data: dict):
     return username, password
 
 
-async def _handle_register(session: ClientSession, _get_match: GetCurrentMatch,
-                            users_repo: UsersRepository, _queue: MatchmakingQueue, data: dict) -> Envelope:
+async def _handle_register(session: ClientSession, ctx: DispatchContext, data: dict) -> Envelope:
     credentials = _credentials(data)
     if credentials is None:
         return _error(ErrorCode.MALFORMED_COMMAND)
 
-    result = await auth_service.register(users_repo, *credentials)
+    result = await auth_service.register(ctx.users_repo, *credentials)
     if not result.ok:
         return _error(ErrorCode(result.error))
 
@@ -97,35 +102,93 @@ async def _handle_register(session: ClientSession, _get_match: GetCurrentMatch,
     return Envelope(type='registered', data={'username': result.user.username, 'elo': result.user.elo})
 
 
-async def _handle_login(session: ClientSession, _get_match: GetCurrentMatch,
-                         users_repo: UsersRepository, _queue: MatchmakingQueue, data: dict) -> Envelope:
+async def _handle_login(session: ClientSession, ctx: DispatchContext, data: dict) -> Envelope:
     credentials = _credentials(data)
     if credentials is None:
         return _error(ErrorCode.MALFORMED_COMMAND)
 
-    result = await auth_service.login(users_repo, *credentials)
+    result = await auth_service.login(ctx.users_repo, *credentials)
     if not result.ok:
         return _error(ErrorCode(result.error))
 
     session.user_id, session.username = result.user.id, result.user.username
+
+    # Reconnection: re-login is how a client re-proves its identity — no
+    # session tokens. If this user_id disconnected out of an active room
+    # within the grace period, rebind them into it instead of the normal
+    # login response.
+    reclaimed = ctx.reconnect_state.reclaim(session.user_id)
+    if reclaimed is not None:
+        reclaimed_role, room_id = reclaimed
+        room = ctx.room_manager.get(room_id)
+        if room is not None:
+            session.role, session.room_id = reclaimed_role, room_id
+            return Envelope(type='state_sync', data={
+                'role': reclaimed_role.value,
+                'room_id': room_id,
+                'state': state_sync_payload(room.engine),
+            })
+        # The room already ended before they reconnected (e.g. the other
+        # player won in the meantime) — nothing to rebind into, fall
+        # through to a normal login response.
+
     return Envelope(type='logged_in', data={'username': result.user.username, 'elo': result.user.elo})
 
 
-async def _handle_queue_join(session: ClientSession, _get_match: GetCurrentMatch,
-                              users_repo: UsersRepository, queue: MatchmakingQueue, _data: dict) -> Envelope:
+async def _handle_queue_join(session: ClientSession, ctx: DispatchContext, _data: dict) -> Envelope:
     if session.user_id is None:
         return _error(ErrorCode.NOT_AUTHENTICATED)
-    user = await users_repo.get_by_id(session.user_id)
-    queue.enqueue(session.user_id, user.elo)
+    user = await ctx.users_repo.get_by_id(session.user_id)
+    ctx.matchmaking_queue.enqueue(session.user_id, user.elo)
     return Envelope(type='queued', data={})
 
 
-async def _handle_queue_cancel(session: ClientSession, _get_match: GetCurrentMatch,
-                                _users_repo: UsersRepository, queue: MatchmakingQueue, _data: dict) -> Envelope:
+async def _handle_queue_cancel(session: ClientSession, ctx: DispatchContext, _data: dict) -> Envelope:
     if session.user_id is None:
         return _error(ErrorCode.NOT_AUTHENTICATED)
-    was_queued = queue.dequeue(session.user_id)
+    was_queued = ctx.matchmaking_queue.dequeue(session.user_id)
     return Envelope(type='queue_cancelled', data={'was_queued': was_queued})
+
+
+async def _handle_create_room(session: ClientSession, ctx: DispatchContext, _data: dict) -> Envelope:
+    if session.user_id is None:
+        return _error(ErrorCode.NOT_AUTHENTICATED)
+    if session.room_id is not None:
+        return _error(ErrorCode.ALREADY_IN_A_ROOM)
+
+    room = ctx.room_manager.create_room()
+    session.room_id, session.role = room.room_id, Role.WHITE
+    room.start()
+    return Envelope(type='room_created', data={'room_id': room.room_id, 'role': Role.WHITE.value})
+
+
+async def _handle_join_room(session: ClientSession, ctx: DispatchContext, data: dict) -> Envelope:
+    if session.user_id is None:
+        return _error(ErrorCode.NOT_AUTHENTICATED)
+    if session.room_id is not None:
+        return _error(ErrorCode.ALREADY_IN_A_ROOM)
+
+    room_id = data.get('room_id')
+    if not isinstance(room_id, str) or not room_id:
+        return _error(ErrorCode.MALFORMED_COMMAND)
+
+    room = ctx.room_manager.get(room_id)
+    if room is None:
+        return _error(ErrorCode.ROOM_NOT_FOUND)
+
+    role = _next_role_for(ctx.session_manager, room_id)
+    session.room_id, session.role = room_id, role
+    return Envelope(type='room_joined', data={'room_id': room_id, 'role': role.value})
+
+
+def _next_role_for(session_manager: SessionManager, room_id: str) -> Role:
+    """1st joiner -> WHITE, 2nd -> BLACK, 3rd+ -> VIEWER."""
+    occupied = {s.role for s in session_manager.sessions if s.room_id == room_id}
+    if Role.WHITE not in occupied:
+        return Role.WHITE
+    if Role.BLACK not in occupied:
+        return Role.BLACK
+    return Role.VIEWER
 
 
 _HANDLERS: Dict[str, Handler] = {
@@ -136,11 +199,14 @@ _HANDLERS: Dict[str, Handler] = {
     'login': _handle_login,
     'queue_join': _handle_queue_join,
     'queue_cancel': _handle_queue_cancel,
+    'create_room': _handle_create_room,
+    'join_room': _handle_join_room,
 }
 
 
 def build_dispatcher(
-    get_current_match: GetCurrentMatch, users_repo: UsersRepository, matchmaking_queue: MatchmakingQueue,
+    room_manager: RoomManager, session_manager: SessionManager, users_repo: UsersRepository,
+    matchmaking_queue: MatchmakingQueue, reconnect_state: ReconnectState,
 ) -> Callable[[ClientSession, str], Awaitable[str]]:
     """
     Build the on_message callback network/server.py calls for every raw
@@ -148,6 +214,7 @@ def build_dispatcher(
     sender — malformed envelopes and unrecognized types get an error
     response of their own rather than being silently dropped.
     """
+    ctx = DispatchContext(room_manager, session_manager, users_repo, matchmaking_queue, reconnect_state)
 
     async def on_message(session: ClientSession, raw: str) -> str:
         try:
@@ -159,30 +226,6 @@ def build_dispatcher(
         if handler is None:
             return encode(_error(ErrorCode.UNKNOWN_COMMAND))
 
-        return encode(await handler(session, get_current_match, users_repo, matchmaking_queue, envelope.data))
+        return encode(await handler(session, ctx, envelope.data))
 
     return on_message
-
-
-def build_broadcaster(bus: AsyncMessageBus, session_manager: SessionManager, topic: str) -> Unsubscribe:
-    """
-    Subscribe to topic and fan every game event out to the two active match
-    participants — sessions with role is not None. Since Phase 3, session
-    count can exceed two (a matchmaking queue of bystanders waiting their
-    turn), and those bystanders must not see a match they aren't part of;
-    role doubles as "is this session in the currently active match" for
-    exactly that reason.
-    """
-
-    async def handler(event) -> None:
-        envelope_type, data = to_wire(event)
-        raw = encode(Envelope(type=envelope_type, data=data))
-        for session in session_manager.sessions:
-            if session.role is None:
-                continue
-            try:
-                await session.websocket.send(raw)
-            except ConnectionClosed:
-                pass  # the session's own connection handler will clean it up
-
-    return bus.subscribe(topic, handler)

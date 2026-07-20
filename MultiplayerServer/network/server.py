@@ -45,14 +45,20 @@ def make_handler(
     session_manager: SessionManager,
     on_admit: Optional[Callable[[ClientSession], None]] = None,
     on_message: Optional[Callable[[ClientSession, str], Awaitable[Optional[str]]]] = None,
+    on_disconnect: Optional[Callable[[ClientSession], Awaitable[None]]] = None,
 ) -> Callable[[ServerConnection], Awaitable[None]]:
     """
     Build the per-connection coroutine websockets.serve runs for each client.
 
-    Stays transport-only: on_admit/on_message are injected by the
-    composition root (main.py, via network/dispatch.py) so this module
+    Stays transport-only: on_admit/on_message/on_disconnect are injected by
+    the composition root (main.py, via network/dispatch.py) so this module
     never has to import anything game-related to route a message —
     it just calls the hook and, if it returns text, sends that text back.
+
+    on_disconnect always fires in `finally`, not `except ConnectionClosed`:
+    websockets only raises ConnectionClosed for an abnormal close — a
+    clean close just ends the `async for` loop normally, and `finally` is
+    the one place guaranteed to run either way.
     """
 
     async def handle_connection(websocket: ServerConnection) -> None:
@@ -71,6 +77,11 @@ def make_handler(
         except ConnectionClosed:
             pass
         finally:
+            if on_disconnect is not None:
+                try:
+                    await on_disconnect(session)
+                except Exception:
+                    logger.exception('on_disconnect hook raised for session %s', session.session_id)
             session_manager.remove(session)
             logger.info('session %s disconnected', session.session_id)
 

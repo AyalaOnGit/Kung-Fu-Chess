@@ -40,7 +40,7 @@ class EngineEventRelay:
         """
         Diff the current board against the last observed snapshot, publish
         every inferred event, and return that same list — so a caller (e.g.
-        MatchSession's tick loop, watching for GameOver) can react to what
+        a Room's tick loop, watching for GameOver) can react to what
         just happened without a second subscription to the same topic.
         """
         current = FrozenSnapshot.from_board(self._engine.board, self._engine.game_over)

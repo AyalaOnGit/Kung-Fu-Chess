@@ -91,6 +91,43 @@ async def test_on_admit_hook_fires_once_per_admitted_connection():
 
 
 @pytest.mark.asyncio
+async def test_on_disconnect_hook_fires_when_the_client_closes_cleanly():
+    session_manager = SessionManager()
+    disconnected = []
+
+    async def on_disconnect(session):
+        disconnected.append(session)
+
+    handler = make_handler(session_manager, on_disconnect=on_disconnect)
+
+    async with serve(handler, 'localhost', 0) as server:
+        port = server.sockets[0].getsockname()[1]
+        async with connect(f'ws://localhost:{port}') as client:
+            await client.recv()  # 'connected'
+        await asyncio.sleep(0.05)
+
+    assert len(disconnected) == 1
+
+
+@pytest.mark.asyncio
+async def test_on_disconnect_exception_does_not_prevent_session_removal():
+    session_manager = SessionManager()
+
+    async def broken_on_disconnect(_session):
+        raise RuntimeError('boom')
+
+    handler = make_handler(session_manager, on_disconnect=broken_on_disconnect)
+
+    async with serve(handler, 'localhost', 0) as server:
+        port = server.sockets[0].getsockname()[1]
+        async with connect(f'ws://localhost:{port}') as client:
+            await client.recv()
+        await asyncio.sleep(0.05)
+
+    assert len(session_manager.sessions) == 0
+
+
+@pytest.mark.asyncio
 async def test_on_message_hook_response_is_sent_back_to_the_sender():
     session_manager = SessionManager()
 

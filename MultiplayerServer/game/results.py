@@ -1,9 +1,9 @@
 """
 Records a finished match's result and updates both players' ELO.
 
-This is the callback MatchSession's on_game_over hook invokes when a
-GameOver event comes out of a tick — the "existing hook, extended" that
-§5 Phase 2 describes, rather than a new mechanism bolted on separately.
+This is the callback a Room's on_game_over hook invokes when a game ends
+(by capture or resignation) — the "existing hook, extended" that §5 Phase
+2 describes, rather than a new mechanism bolted on separately.
 """
 from __future__ import annotations
 from typing import Optional

@@ -1,8 +1,12 @@
 """
 The only async code in matchmaking/ — polls queue.py's pure methods
-roughly once a second and acts on the results: pairs waiting players
-(if no match is currently in progress — Phase 1-4 has exactly one match
-slot, per §5) and notifies players whose wait timed out.
+roughly once a second and acts on the results: pairs waiting players and
+notifies players whose wait timed out.
+
+Phase 1-4 capped this at one pairing per poll (is_match_in_progress gated
+it entirely) because only one match could exist for the whole process.
+Phase 5's game/rooms.py::Room removed that limit — many rooms can run
+concurrently — so this loop now pairs everyone it can each poll.
 """
 from __future__ import annotations
 import asyncio
@@ -16,19 +20,17 @@ logger = logging.getLogger(__name__)
 
 OnPaired = Callable[[int, int], Awaitable[None]]  # (white_user_id, black_user_id)
 OnTimeout = Callable[[int], Awaitable[None]]  # (user_id)
-IsMatchInProgress = Callable[[], bool]
 
 
 class MatchmakerLoop:
-    """start()/stop() mirror MatchSession's — same teardown discipline (§3.2)."""
+    """start()/stop() mirror game/rooms.py::Room's — same teardown discipline (§3.2)."""
 
     def __init__(self, queue: MatchmakingQueue, clock: Clock, on_paired: OnPaired, on_timeout: OnTimeout,
-                 is_match_in_progress: IsMatchInProgress, poll_interval_seconds: float = 1.0):
+                 poll_interval_seconds: float = 1.0):
         self._queue = queue
         self._clock = clock
         self._on_paired = on_paired
         self._on_timeout = on_timeout
-        self._is_match_in_progress = is_match_in_progress
         self._poll_interval_seconds = poll_interval_seconds
         self._task: Optional[asyncio.Task] = None
 
@@ -63,10 +65,7 @@ class MatchmakerLoop:
         for user_id in self._queue.expire(now):
             await self._safe_call(self._on_timeout, user_id)
 
-        if self._is_match_in_progress():
-            return  # only one slot; leave everyone queued for the next poll
-
-        for white_id, black_id in self._queue.find_pairings(now, max_pairs=1):
+        for white_id, black_id in self._queue.find_pairings(now):
             await self._safe_call(self._on_paired, white_id, black_id)
 
     @staticmethod

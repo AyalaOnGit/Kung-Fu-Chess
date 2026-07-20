@@ -23,6 +23,8 @@ class ErrorCode(Enum):
     INVALID_CREDENTIALS = 'invalid_credentials'
     NOT_AUTHENTICATED   = 'not_authenticated'
     NOT_IN_A_MATCH      = 'not_in_a_match'
+    ALREADY_IN_A_ROOM   = 'already_in_a_room'
+    ROOM_NOT_FOUND      = 'room_not_found'
     QUEUE_TIMEOUT       = 'queue_timeout'
     VIEWER_READ_ONLY    = 'viewer_read_only'
     NOT_YOUR_PIECE      = 'not_your_piece'

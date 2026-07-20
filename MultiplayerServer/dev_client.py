@@ -10,6 +10,8 @@ Commands (typed at the prompt, one per line):
     login <username> <password>
     queue
     unqueue
+    create_room
+    join_room <room_id>
     move <src_row> <src_col> <dest_row> <dest_col>
     jump <row> <col>
     ping
@@ -65,8 +67,15 @@ def _parse_command(line: str) -> Optional[Envelope]:
     if cmd == 'unqueue' and len(parts) == 1:
         return Envelope(type='queue_cancel', data={})
 
+    if cmd == 'create_room' and len(parts) == 1:
+        return Envelope(type='create_room', data={})
+
+    if cmd == 'join_room' and len(parts) == 2:
+        return Envelope(type='join_room', data={'room_id': parts[1]})
+
     print(f'unrecognized command: {line!r}')
     print('usage: register <user> <pw> | login <user> <pw> | queue | unqueue |'
+          ' create_room | join_room <room_id> |'
           ' move <sr> <sc> <dr> <dc> | jump <r> <c> | ping | quit')
     return None
 
