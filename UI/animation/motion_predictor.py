@@ -6,12 +6,30 @@ Interpolates pixel positions during piece movement/jumps using predicted travel 
 from __future__ import annotations
 from typing import NamedTuple
 
+from kungfu_chess.config import CELL_SIZE_PX, PIECE_SPEED_PPS
+from kungfu_chess.model.position import Position
+
 
 class PixelMotion(NamedTuple):
     """Represents a piece's motion from one cell to another."""
     src_px: tuple[int, int]  # (x, y) pixel coordinates at start
     dst_px: tuple[int, int]  # (x, y) pixel coordinates at end
     duration_ms: float       # total milliseconds for motion
+
+
+def cell_distance(src: Position, dst: Position) -> int:
+    """Chebyshev distance (in cells) between two board positions."""
+    return max(abs(dst.col - src.col), abs(dst.row - src.row))
+
+
+def duration_for_distance_ms(distance_cells: int) -> float:
+    """Milliseconds a slide move covers, given a distance in cells."""
+    return distance_cells * (CELL_SIZE_PX * 1000.0 / PIECE_SPEED_PPS)
+
+
+def duration_for_move_ms(src: Position, dst: Position) -> float:
+    """Milliseconds a slide move from src to dst will take."""
+    return duration_for_distance_ms(cell_distance(src, dst))
 
 
 def interpolate_pixel(motion: PixelMotion, elapsed_ms: float) -> tuple[int, int]:

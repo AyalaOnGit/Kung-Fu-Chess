@@ -1,8 +1,9 @@
 """
-Non-blocking cv2 window management.
+Non-blocking window management.
 
-Wraps cv2.imshow() + cv2.setMouseCallback() + cv2.waitKey(1) + close-detect
-into a manageable per-frame loop without blocking.
+Wraps window display, mouse input, and close-detection into a manageable
+per-frame loop without blocking. All OpenCV access is delegated to Img;
+this module never calls cv2 directly.
 
 Keys:
   +  / =   increase scale by SCALE_STEP
@@ -10,15 +11,15 @@ Keys:
 """
 from __future__ import annotations
 from typing import Callable, Optional
-import cv2
 import numpy as np
 
+from vendor.img import Img, MouseEventType
 from ui_config import SCALE_DEFAULT, SCALE_STEP, SCALE_MIN, SCALE_MAX
 
 
 class Window:
     """
-    Non-blocking OpenCV window controller.
+    Non-blocking window controller.
 
     Responsibilities:
       - Show one frame per display_frame() call, scaled to current zoom level
@@ -33,20 +34,20 @@ class Window:
         self._height = height
         self._scale  = SCALE_DEFAULT
         self._window_open = True
-        self._mouse_callback: Optional[Callable[[int, int, int, int, int], None]] = None
+        self._mouse_callback: Optional[Callable[[MouseEventType, int, int, int, int], None]] = None
 
-    def set_mouse_callback(self, callback: Callable[[int, int, int, int, int], None]) -> None:
+    def set_mouse_callback(self, callback: Callable[[MouseEventType, int, int, int, int], None]) -> None:
         """Set the mouse callback; coordinates are mapped back to logical (unscaled) space."""
         self._mouse_callback = callback
-        cv2.namedWindow(self._title, cv2.WINDOW_NORMAL)
-        cv2.setMouseCallback(self._title, self._on_mouse)
+        Img.create_window(self._title)
+        Img.set_mouse_callback(self._title, self._on_mouse)
 
     def _on_mouse(self, event: int, x: int, y: int, flags: int, param: None) -> None:
         """Map scaled pixel coords back to logical coords before forwarding."""
         if self._mouse_callback:
             lx = int(x / self._scale)
             ly = int(y / self._scale)
-            self._mouse_callback(event, lx, ly, flags, param)
+            self._mouse_callback(MouseEventType(event), lx, ly, flags, param)
 
     def display_frame(self, frame: np.ndarray, fps: Optional[float] = None) -> None:
         """
@@ -58,32 +59,25 @@ class Window:
         if not self._window_open:
             return
 
-        display = frame.copy()
+        img = Img()
+        img.img = frame.copy()
 
         if fps is not None:
-            from vendor.img import Img
-            img = Img()
-            img.img = display
             img.put_text(f"FPS: {fps:.1f}", 10, 30, 0.7, (255, 255, 255), 2)
 
-        # Scale the frame for display
         if self._scale != 1.0:
-            new_w = max(1, int(display.shape[1] * self._scale))
-            new_h = max(1, int(display.shape[0] * self._scale))
-            interp = cv2.INTER_LINEAR if self._scale > 1.0 else cv2.INTER_AREA
-            display = cv2.resize(display, (new_w, new_h), interpolation=interp)
+            new_w = max(1, int(img.img.shape[1] * self._scale))
+            new_h = max(1, int(img.img.shape[0] * self._scale))
+            img.resize(new_w, new_h)
 
-        try:
-            cv2.namedWindow(self._title, cv2.WINDOW_NORMAL)
-            cv2.imshow(self._title, display)
-        except cv2.error:
+        if not img.show_in_window(self._title):
             self._window_open = False
             return
 
-        key = cv2.waitKey(1) & 0xFF
+        key = Img.wait_key(1)
         self._handle_key(key)
 
-        if cv2.getWindowProperty(self._title, cv2.WND_PROP_VISIBLE) < 0:
+        if not Img.is_window_visible(self._title):
             self._window_open = False
 
     def _handle_key(self, key: int) -> None:
@@ -104,8 +98,5 @@ class Window:
 
     def close(self) -> None:
         """Close the window."""
-        try:
-            cv2.destroyWindow(self._title)
-        except cv2.error:
-            pass
+        Img.destroy_window(self._title)
         self._window_open = False

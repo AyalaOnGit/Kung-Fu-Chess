@@ -82,6 +82,23 @@ class TestGameEngine(unittest.TestCase):
         result = self._move(engine, Position(0, 3), Position(0, 5))
         self.assertTrue(result.is_accepted)
 
+    def test_cooldown_rejects_jump(self):
+        p = W(Kind.ROOK, 0, 0)
+        _, engine = self._make(p, cooldown_ms=1000)
+        self._move(engine, Position(0, 0), Position(0, 3))
+        engine.wait(3000)  # piece has arrived at (0,3) and is now cooling
+        result = self._jump(engine, Position(0, 3))
+        self.assertFalse(result.is_accepted)
+        self.assertEqual(result.reason, 'motion_in_progress')
+
+    def test_cooldown_expires_and_allows_jump(self):
+        p = W(Kind.ROOK, 0, 0)
+        _, engine = self._make(p, cooldown_ms=1000)
+        self._move(engine, Position(0, 0), Position(0, 3))
+        engine.wait(3000 + 1000)
+        result = self._jump(engine, Position(0, 3))
+        self.assertTrue(result.is_accepted)
+
     def test_wait_advances_clock(self):
         p = W(Kind.ROOK, 0, 0)
         _, engine = self._make(p)

@@ -19,7 +19,7 @@ from kungfu_chess.input.controller import Controller
 from kungfu_chess.model.position import Position
 from kungfu_chess.model.piece import Piece, PieceState
 from kungfu_chess.input.board_mapper import BoardMapper
-from kungfu_chess.config import CELL_SIZE_PX, PIECE_SPEED_PPS, JUMP_DURATION_MS
+from kungfu_chess.config import JUMP_DURATION_MS
 
 from state.observer import Subject
 from state.game_events import (
@@ -27,7 +27,7 @@ from state.game_events import (
     PieceHalted, Promotion, GameOver, GameEvent
 )
 from state.snapshot_diff import FrozenSnapshot, diff_snapshots
-from animation.motion_predictor import PixelMotion
+from animation.motion_predictor import PixelMotion, duration_for_move_ms
 
 
 @dataclass
@@ -92,6 +92,12 @@ class GameFacade:
             return
         result = self._controller.on_jump(x, y)
         print(f"[jump] {piece.token()} at {pos} → accepted={result.is_accepted if result else 'n/a'} reason={result.reason if result else 'n/a'}")
+        if result is None or not result.is_accepted:
+            # Rejected (e.g. piece is on cooldown, already moving/jumping, game over) —
+            # do NOT queue an animation for a jump that never actually happened.
+            if result is not None:
+                self._subject.publish(MoveRejected(piece=piece, reason=result.reason))
+            return
         # Track the jump as a pending motion so animations resolve correctly
         now = self._engine.clock_ms
         self._pending_motions[piece.id] = PendingMotionData(
@@ -118,7 +124,7 @@ class GameFacade:
         command_result, src_pos, dst_pos, piece = result
         if command_result.is_accepted and piece is not None:
             self._subject.publish(MoveAccepted(piece=piece, src_pos=src_pos, dst_pos=dst_pos))
-            motion_duration_ms = self._calculate_motion_duration(src_pos, dst_pos)
+            motion_duration_ms = duration_for_move_ms(src_pos, dst_pos)
             now = self._engine.clock_ms
             self._pending_motions[piece.id] = PendingMotionData(
                 piece=piece,
@@ -128,12 +134,9 @@ class GameFacade:
                 motion_start_time_ms=now,
                 motion_end_time_ms=now + motion_duration_ms,
             )
+        elif piece is not None:
+            self._subject.publish(MoveRejected(piece=piece, reason=command_result.reason))
         return True
-
-    def _calculate_motion_duration(self, src_pos: Position, dst_pos: Position) -> float:
-        """Calculate motion duration in milliseconds for a move."""
-        distance_cells = max(abs(dst_pos.col - src_pos.col), abs(dst_pos.row - src_pos.row))
-        return distance_cells * (CELL_SIZE_PX * 1000.0 / PIECE_SPEED_PPS)
     
     # --- Core loop ---
     
@@ -160,20 +163,17 @@ class GameFacade:
         for piece_id, motion_data in self._pending_motions.items():
             if current_time >= motion_data.motion_end_time_ms:
                 completed_ids.append(piece_id)
-            elif not motion_data.is_jump:
-                # The server may have stopped the piece early (blocked by friendly).
-                # If the piece's actual board position differs from dst_pos, update
-                # dst_pos so the animation lerps to the real landing cell.
+            elif not motion_data.is_jump and motion_data.piece.state is not PieceState.MOVING:
+                # piece.cell only updates on arrival (Board.move_piece), never mid-flight,
+                # so a state change away from MOVING is the only way to detect that the
+                # server resolved the arrival early (e.g. redirected to a shorter landing
+                # cell because the path became blocked). Treat it as completed now, using
+                # the piece's real landing cell instead of the originally requested dst.
                 actual_pos = motion_data.piece.cell
-                if actual_pos != motion_data.dst_pos and actual_pos != motion_data.src_pos:
+                if actual_pos != motion_data.dst_pos:
                     motion_data.dst_pos = actual_pos
-                    # Shorten the animation: recalculate end time based on real distance
-                    real_duration = self._calculate_motion_duration(
-                        motion_data.src_pos, actual_pos
-                    )
-                    motion_data.motion_end_time_ms = (
-                        motion_data.motion_start_time_ms + real_duration
-                    )
+                    self._subject.publish(PieceHalted(piece=motion_data.piece, halted_at=actual_pos))
+                completed_ids.append(piece_id)
 
         # Remove completed
         for piece_id in completed_ids:
@@ -252,12 +252,7 @@ class GameFacade:
         if motion_data.is_jump:
             duration_ms = float(JUMP_DURATION_MS)
         else:
-            distance_cells = max(
-                abs(motion_data.dst_pos.col - motion_data.src_pos.col),
-                abs(motion_data.dst_pos.row - motion_data.src_pos.row),
-            )
-            distance_px = distance_cells * CELL_SIZE_PX
-            duration_ms = (distance_px / PIECE_SPEED_PPS) * 1000.0
+            duration_ms = duration_for_move_ms(motion_data.src_pos, motion_data.dst_pos)
 
         pixel_motion = PixelMotion(
             src_px=(src_px_x, src_px_y),

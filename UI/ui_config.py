@@ -29,10 +29,24 @@ PLAYER_BLACK = "Black"
 # Sidebar layout
 SIDEBAR_WIDTH_PX = 300
 SIDEBAR_BG_COLOR = (40, 40, 40)
+SIDEBAR_MARGIN_PX = 14
 
 # Text rendering
 TEXT_COLOR = (200, 200, 200)
-TEXT_DARK = (100, 100, 100)
+
+# HUD font scales (cv2 putText font_size units)
+HUD_FONT_SCALE_HEADER = 0.65        # player name headers
+HUD_FONT_SCALE_SECTION = 0.55       # "Moves" section title
+HUD_FONT_SCALE_LABEL = 0.5          # score line
+HUD_FONT_SCALE_COLUMN_HEADER = 0.45 # black/white column headers above moves
+HUD_FONT_SCALE_MOVE = 0.4           # individual move entries
+
+# Moves log layout
+MOVES_LOG_VISIBLE_ROWS = 10
+MOVES_LOG_ROW_HEIGHT_PX = 18
+
+# Captured-piece thumbnail size (px)
+CAPTURED_THUMB_SIZE_PX = 28
 
 # Piece size relative to cell (0.0–1.0); 0.70 = 70px out of 100px per cell
 PIECE_SCALE = 0.70
@@ -43,6 +57,31 @@ SKIN = "pieces_mine"
 # Asset paths (relative to ui/ directory)
 BOARD_IMAGE_PATH = "assets/board.png"
 PIECES_PATH = f"assets/{SKIN}"
-SELECTION_OVERLAY_PATH = "assets/selection_highlight.png"
-HALT_FLASH_OVERLAY_PATH = "assets/halt_flash.png"
-PANEL_BG_PATH = "assets/panel_background.png"
+
+# --- Board overlay colors/sizes (selection, jump ring, cooldown bar) ---
+SELECTION_COLOR = (80, 200, 80, 180)
+SELECTION_BORDER_COLOR = (100, 255, 100, 255)
+SELECTION_BORDER_THICKNESS = 2
+SELECTION_FILL_ALPHA = 0.35
+
+JUMP_RING_COLOR = (255, 220, 0, 255)
+JUMP_RING_THICKNESS = 3
+JUMP_RING_MARGIN_PX = 4
+
+COOLDOWN_BAR_BG_COLOR = (30, 30, 30, 200)
+COOLDOWN_BAR_FG_COLOR = (0, 140, 255, 255)
+COOLDOWN_BAR_HEIGHT_PX = 6
+COOLDOWN_BAR_MARGIN_PX = 4
+
+HALT_FLASH_COLOR = (0, 0, 255, 255)
+HALT_FLASH_THICKNESS = 4
+HALT_FLASH_DURATION_MS = 200.0
+
+GAME_OVER_OVERLAY_COLOR = (0, 0, 0)
+GAME_OVER_OVERLAY_ALPHA = 0.55
+GAME_OVER_TEXT_COLOR = (255, 255, 255, 255)
+GAME_OVER_FONT_SCALE = 1.2
+
+# --- Mouse input ---
+DOUBLE_CLICK_MS = 300      # ms between two clicks to count as a double-click
+DOUBLE_CLICK_RADIUS_PX = 20  # max pixel distance between the two clicks

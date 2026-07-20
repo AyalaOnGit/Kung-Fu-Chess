@@ -4,7 +4,6 @@ Board renderer: draws the board and all pieces with animations.
 from __future__ import annotations
 from typing import Optional, Dict, TYPE_CHECKING
 import numpy as np
-import cv2
 
 from vendor.img import Img
 from graphics.sprite_loader import SpriteLoader
@@ -15,16 +14,15 @@ from kungfu_chess.model.position import Position
 from kungfu_chess.model.board import Board
 from kungfu_chess.model.piece import Piece, PieceState
 from kungfu_chess.input.board_mapper import BoardMapper
-from ui_config import PIECE_SCALE
+from ui_config import (
+    PIECE_SCALE, SELECTION_COLOR, SELECTION_BORDER_COLOR, SELECTION_BORDER_THICKNESS,
+    SELECTION_FILL_ALPHA, JUMP_RING_COLOR, JUMP_RING_THICKNESS, JUMP_RING_MARGIN_PX,
+    COOLDOWN_BAR_BG_COLOR, COOLDOWN_BAR_FG_COLOR, COOLDOWN_BAR_HEIGHT_PX, COOLDOWN_BAR_MARGIN_PX,
+    HALT_FLASH_COLOR, HALT_FLASH_THICKNESS,
+)
 
 if TYPE_CHECKING:
     from state.game_facade import GameFacade
-
-_SEL_COLOR = (80, 200, 80, 180)
-_COOL_BG   = (30, 30, 30, 200)
-_COOL_FG   = (0, 140, 255, 255)
-_BAR_H     = 6
-_BAR_MARGIN = 4
 
 
 class BoardRenderer:
@@ -48,9 +46,14 @@ class BoardRenderer:
 
         self._animators: Dict[int, PieceAnimator] = {}
         self._selected_pos: Optional[Position] = None
+        self._halted_piece_id: Optional[int] = None
 
     def set_selection(self, pos: Optional[Position]) -> None:
         self._selected_pos = pos
+
+    def set_halted_piece(self, piece_id: Optional[int]) -> None:
+        """Mark a piece as currently flashing (was redirected/halted mid-flight)."""
+        self._halted_piece_id = piece_id
 
     def _get_animator(self, piece: Piece) -> PieceAnimator:
         if piece.id not in self._animators:
@@ -67,14 +70,15 @@ class BoardRenderer:
         }.get(state, PieceAnimatorState.IDLE)
 
     def render(self, dt_ms: float) -> np.ndarray:
-        frame = self._board_img.img.copy()
-        if frame.shape[2] == 3:
-            frame = cv2.cvtColor(frame, cv2.COLOR_BGR2BGRA)
+        frame_img = Img()
+        frame_img.img = self._board_img.img.copy()
+        frame_img.to_bgra()
 
         static_pieces: list[tuple] = []
         moving_pieces: list[tuple] = []
 
-        for pos, piece in self._board._grid.items():
+        for piece in self._board.all_pieces():
+            pos = piece.cell
             animator = self._get_animator(piece)
             desired  = self._piece_state_to_anim(piece.state)
             if animator.state != desired:
@@ -92,90 +96,78 @@ class BoardRenderer:
                 static_pieces.append((piece, cell_x, cell_y, cw, ch))
 
         if self._selected_pos:
-            self._draw_selection(frame, self._selected_pos)
+            self._draw_selection(frame_img, self._selected_pos)
 
         for piece, cx, cy, cw, ch in static_pieces:
-            self._draw_piece(frame, piece, cx, cy, cw, ch)
+            self._draw_piece(frame_img, piece, cx, cy, cw, ch)
         for piece, cx, cy, cw, ch in moving_pieces:
-            self._draw_piece(frame, piece, cx, cy, cw, ch)
+            self._draw_piece(frame_img, piece, cx, cy, cw, ch)
 
-        return frame
+        return frame_img.img
 
-    def _draw_selection(self, frame: np.ndarray, pos: Position) -> None:
+    def _draw_selection(self, frame_img: Img, pos: Position) -> None:
         x, y   = self._mapper.position_to_pixel(pos)
         cw, ch = self._mapper.cell_size(pos)
-        overlay = frame.copy()
-        cv2.rectangle(overlay, (x + 2, y + 2), (x + cw - 2, y + ch - 2), _SEL_COLOR, -1)
-        cv2.addWeighted(overlay, 0.35, frame, 0.65, 0, frame)
-        fi = Img(); fi.img = frame
-        fi.draw_rect(x + 2, y + 2, x + cw - 2, y + ch - 2, (100, 255, 100, 255), 2)
+        frame_img.fill_rect_blend(x + 2, y + 2, x + cw - 2, y + ch - 2,
+                                   SELECTION_COLOR, SELECTION_FILL_ALPHA)
+        frame_img.draw_rect(x + 2, y + 2, x + cw - 2, y + ch - 2,
+                             SELECTION_BORDER_COLOR, SELECTION_BORDER_THICKNESS)
 
-    def _draw_piece(self, frame: np.ndarray, piece: Piece,
+    def _draw_piece(self, frame_img: Img, piece: Piece,
                     cell_x: int, cell_y: int, cell_w: int, cell_h: int) -> None:
         animator   = self._get_animator(piece)
         piece_size = max(1, int(round(min(cell_w, cell_h) * PIECE_SCALE)))
         try:
-            sprite = animator.get_current_frame().image
-            if not isinstance(sprite, np.ndarray):
-                sprite = np.array(sprite, dtype=np.uint8)
-            if sprite.ndim == 2:
-                sprite = cv2.cvtColor(sprite, cv2.COLOR_GRAY2BGRA)
-            elif sprite.shape[2] == 3:
-                sprite = cv2.cvtColor(sprite, cv2.COLOR_BGR2BGRA)
-            sprite = sprite.astype(np.uint8)
+            sprite_img = Img()
+            sprite_img.img = animator.get_current_frame().image
+            sprite_img.to_bgra()
 
-            sh, sw = sprite.shape[:2]
+            sh, sw = sprite_img.img.shape[:2]
             scale  = min(piece_size / float(sw), piece_size / float(sh))
             new_w  = max(1, int(round(sw * scale)))
             new_h  = max(1, int(round(sh * scale)))
             if new_w != sw or new_h != sh:
-                interp = cv2.INTER_AREA if scale < 1.0 else cv2.INTER_LINEAR
-                sprite = cv2.resize(sprite, (new_w, new_h), interpolation=interp)
-                sh, sw = sprite.shape[:2]
+                sprite_img.resize(new_w, new_h)
+            sh, sw = sprite_img.img.shape[:2]
 
             px_x = cell_x + (cell_w - sw) // 2
             px_y = cell_y + (cell_h - sh) // 2
-            self._blit_sprite(frame, sprite, px_x, px_y)
+            frame_img.blit(sprite_img, px_x, px_y)
+
+            if piece.id == self._halted_piece_id:
+                self._draw_halt_flash(frame_img, cell_x, cell_y, cell_w, cell_h)
 
             if piece.state is PieceState.JUMPING:
-                self._draw_jump_ring(frame, cell_x, cell_y, cell_w, cell_h)
+                self._draw_jump_ring(frame_img, cell_x, cell_y, cell_w, cell_h)
             elif piece.state is PieceState.COOLING:
-                self._draw_cooldown_bar(frame, piece, cell_x, cell_y, cell_w, cell_h)
+                self._draw_cooldown_bar(frame_img, piece, cell_x, cell_y, cell_w, cell_h)
 
         except Exception as e:
             print(f"Error drawing piece {piece.token()}: {e}")
 
-    @staticmethod
-    def _blit_sprite(frame: np.ndarray, sprite: np.ndarray,
-                     px_x: int, px_y: int) -> None:
-        sh, sw = sprite.shape[:2]
-        x1 = max(0, px_x);       y1 = max(0, px_y)
-        x2 = min(frame.shape[1], px_x + sw)
-        y2 = min(frame.shape[0], px_y + sh)
-        if x1 >= x2 or y1 >= y2:
-            return
-        src   = sprite[y1 - px_y: y2 - px_y, x1 - px_x: x2 - px_x]
-        alpha = src[:, :, 3:4].astype(float) / 255.0
-        dst   = frame[y1:y2, x1:x2, :3].astype(float)
-        frame[y1:y2, x1:x2, :3] = ((1 - alpha) * dst + alpha * src[:, :, :3]).astype(np.uint8)
-
-    def _draw_jump_ring(self, frame: np.ndarray,
+    def _draw_jump_ring(self, frame_img: Img,
                         cell_x: int, cell_y: int, cell_w: int, cell_h: int) -> None:
-        fi = Img(); fi.img = frame
-        m = 4
-        fi.draw_rect(cell_x + m, cell_y + m,
-                     cell_x + cell_w - m, cell_y + cell_h - m,
-                     (255, 220, 0, 255), 3)
+        m = JUMP_RING_MARGIN_PX
+        frame_img.draw_rect(cell_x + m, cell_y + m,
+                             cell_x + cell_w - m, cell_y + cell_h - m,
+                             JUMP_RING_COLOR, JUMP_RING_THICKNESS)
 
-    def _draw_cooldown_bar(self, frame: np.ndarray, piece: Piece,
+    def _draw_halt_flash(self, frame_img: Img,
+                         cell_x: int, cell_y: int, cell_w: int, cell_h: int) -> None:
+        m = JUMP_RING_MARGIN_PX
+        frame_img.draw_rect(cell_x + m, cell_y + m,
+                             cell_x + cell_w - m, cell_y + cell_h - m,
+                             HALT_FLASH_COLOR, HALT_FLASH_THICKNESS)
+
+    def _draw_cooldown_bar(self, frame_img: Img, piece: Piece,
                            cell_x: int, cell_y: int, cell_w: int, cell_h: int) -> None:
         ratio = self._facade.get_cooldown_ratio(piece)
         if ratio <= 0.0:
             return
-        x1 = cell_x + _BAR_MARGIN
-        x2 = cell_x + cell_w - _BAR_MARGIN
-        y2 = cell_y + cell_h - _BAR_MARGIN
-        y1 = y2 - _BAR_H
-        fi = Img(); fi.img = frame
-        fi.draw_rect(x1, y1, x2, y2, _COOL_BG, -1)
-        fi.draw_rect(x1, y1, x1 + max(1, int(round((x2 - x1) * ratio))), y2, _COOL_FG, -1)
+        x1 = cell_x + COOLDOWN_BAR_MARGIN_PX
+        x2 = cell_x + cell_w - COOLDOWN_BAR_MARGIN_PX
+        y2 = cell_y + cell_h - COOLDOWN_BAR_MARGIN_PX
+        y1 = y2 - COOLDOWN_BAR_HEIGHT_PX
+        frame_img.draw_rect(x1, y1, x2, y2, COOLDOWN_BAR_BG_COLOR, -1)
+        frame_img.draw_rect(x1, y1, x1 + max(1, int(round((x2 - x1) * ratio))), y2,
+                             COOLDOWN_BAR_FG_COLOR, -1)

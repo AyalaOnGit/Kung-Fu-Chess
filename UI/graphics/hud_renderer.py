@@ -6,16 +6,17 @@ Composes board canvas with moves log, score, and captured-piece thumbnails.
 from __future__ import annotations
 import pathlib
 import numpy as np
-import cv2
 
 from vendor.img import Img
-from ui_config import SIDEBAR_WIDTH_PX, SIDEBAR_BG_COLOR, TEXT_COLOR
+from ui_config import (
+    SIDEBAR_WIDTH_PX, SIDEBAR_BG_COLOR, SIDEBAR_MARGIN_PX, TEXT_COLOR,
+    HUD_FONT_SCALE_HEADER, HUD_FONT_SCALE_SECTION, HUD_FONT_SCALE_LABEL,
+    HUD_FONT_SCALE_COLUMN_HEADER, HUD_FONT_SCALE_MOVE,
+    MOVES_LOG_VISIBLE_ROWS, MOVES_LOG_ROW_HEIGHT_PX, CAPTURED_THUMB_SIZE_PX,
+    GAME_OVER_OVERLAY_COLOR, GAME_OVER_OVERLAY_ALPHA, GAME_OVER_TEXT_COLOR,
+    GAME_OVER_FONT_SCALE,
+)
 from kungfu_chess.model.piece import Kind, Color
-
-# Thumbnail size for captured pieces (px)
-_THUMB = 28
-# Pieces dir — set once by main via HudRenderer.set_pieces_dir()
-_PIECES_DIR: pathlib.Path | None = None
 
 # Kind → folder name prefix (matches assets folder names)
 _KIND_CODE = {
@@ -24,58 +25,47 @@ _KIND_CODE = {
 }
 _COLOR_CODE = {Color.WHITE: 'W', Color.BLACK: 'B'}
 
-# Simple LRU-style cache: (kind, color) -> thumbnail ndarray
-_thumb_cache: dict[tuple, np.ndarray] = {}
 
+class ThumbnailCache:
+    """
+    Loads and caches small idle-pose thumbnails for captured-piece display.
 
-def _load_thumb(kind: Kind, color: Color) -> np.ndarray | None:
-    key = (kind, color)
-    if key in _thumb_cache:
-        return _thumb_cache[key]
-    if _PIECES_DIR is None:
-        return None
-    code = _KIND_CODE[kind] + _COLOR_CODE[color]
-    sprite_dir = _PIECES_DIR / code / 'states' / 'idle' / 'sprites'
-    files = sorted(sprite_dir.glob('*.png'), key=lambda p: int(p.stem)) if sprite_dir.exists() else []
-    if not files:
-        return None
-    img = cv2.imread(str(files[0]), cv2.IMREAD_UNCHANGED)
-    if img is None:
-        return None
-    # Crop to content
-    if img.ndim == 3 and img.shape[2] == 4:
-        alpha = img[:, :, 3]
-        rows = np.any(alpha > 10, axis=1)
-        cols = np.any(alpha > 10, axis=0)
-        if rows.any():
-            r0, r1 = np.where(rows)[0][[0, -1]]
-            c0, c1 = np.where(cols)[0][[0, -1]]
-            img = img[r0:r1+1, c0:c1+1]
-    # Resize to thumbnail
-    h, w = img.shape[:2]
-    scale = _THUMB / max(h, w)
-    nw, nh = max(1, int(w * scale)), max(1, int(h * scale))
-    thumb = cv2.resize(img, (nw, nh), interpolation=cv2.INTER_AREA)
-    _thumb_cache[key] = thumb
-    return thumb
+    Sole responsibility: given (kind, color), return a ready-to-blit thumbnail.
+    """
 
+    def __init__(self, size_px: int = CAPTURED_THUMB_SIZE_PX):
+        self._size = size_px
+        self._pieces_dir: pathlib.Path | None = None
+        self._cache: dict[tuple, np.ndarray] = {}
 
-def _blit(frame: np.ndarray, sprite: np.ndarray, x: int, y: int) -> None:
-    """Alpha-composite sprite onto frame at (x, y)."""
-    sh, sw = sprite.shape[:2]
-    x1, y1 = max(0, x), max(0, y)
-    x2, y2 = min(frame.shape[1], x + sw), min(frame.shape[0], y + sh)
-    if x1 >= x2 or y1 >= y2:
-        return
-    src = sprite[y1-y:y2-y, x1-x:x2-x]
-    if sprite.shape[2] == 4:
-        a = src[:, :, 3:4].astype(float) / 255.0
-        frame[y1:y2, x1:x2, :3] = (
-            (1 - a) * frame[y1:y2, x1:x2, :3].astype(float)
-            + a * src[:, :, :3].astype(float)
-        ).astype(np.uint8)
-    else:
-        frame[y1:y2, x1:x2, :3] = src[:, :, :3]
+    def set_pieces_dir(self, path: pathlib.Path) -> None:
+        self._pieces_dir = pathlib.Path(path)
+        self._cache.clear()
+
+    def get(self, kind: Kind, color: Color) -> np.ndarray | None:
+        key = (kind, color)
+        if key in self._cache:
+            return self._cache[key]
+        if self._pieces_dir is None:
+            return None
+
+        code = _KIND_CODE[kind] + _COLOR_CODE[color]
+        sprite_dir = self._pieces_dir / code / 'states' / 'idle' / 'sprites'
+        files = sorted(sprite_dir.glob('*.png'), key=lambda p: int(p.stem)) if sprite_dir.exists() else []
+        if not files:
+            return None
+
+        try:
+            thumb_img = Img().read(files[0])
+        except FileNotFoundError:
+            return None
+        thumb_img.crop_to_content()
+        h, w = thumb_img.img.shape[:2]
+        scale = self._size / max(h, w)
+        thumb_img.resize(max(1, int(w * scale)), max(1, int(h * scale)))
+
+        self._cache[key] = thumb_img.img
+        return thumb_img.img
 
 
 class HudRenderer:
@@ -107,12 +97,12 @@ class HudRenderer:
         self._black_captured: list[Kind] = []
         self._white_moves: list[str] = []
         self._black_moves: list[str] = []
+        self._game_over_message: str | None = None
+        self._thumbnails = ThumbnailCache()
 
-    @staticmethod
-    def set_pieces_dir(path: pathlib.Path) -> None:
+    def set_pieces_dir(self, path: pathlib.Path) -> None:
         """Tell HudRenderer where to find piece sprites for thumbnails."""
-        global _PIECES_DIR
-        _PIECES_DIR = pathlib.Path(path)
+        self._thumbnails.set_pieces_dir(path)
 
     def update_score(self, white_score: int, black_score: int,
                      white_captured: list[Kind] | None = None,
@@ -126,6 +116,10 @@ class HudRenderer:
         self._white_moves = list(moves.get('white', []))
         self._black_moves = list(moves.get('black', []))
 
+    def set_game_over(self, message: str | None) -> None:
+        """Set (or clear, with None) the game-over banner message."""
+        self._game_over_message = message
+
     def render(self, board_frame: np.ndarray) -> np.ndarray:
         h, w = board_frame.shape[:2]
         channels = board_frame.shape[2] if board_frame.ndim > 2 else 1
@@ -134,21 +128,21 @@ class HudRenderer:
         if isinstance(bg, (list, tuple)) and len(bg) != channels:
             bg = (*bg, 255) if channels == 4 else tuple(bg[:3])
         sidebar = np.full((h, SIDEBAR_WIDTH_PX, channels), bg, dtype=np.uint8)
-        frame = np.hstack([board_frame, sidebar])
-        if frame.shape[2] == 3:
-            frame = cv2.cvtColor(frame, cv2.COLOR_BGR2BGRA)
 
-        img = Img(); img.img = frame
-        sx = w + 14   # sidebar left margin
-        sw = SIDEBAR_WIDTH_PX - 28
+        img = Img()
+        img.img = np.hstack([board_frame, sidebar])
+        img.to_bgra()
+
+        sx = w + SIDEBAR_MARGIN_PX
+        sw = SIDEBAR_WIDTH_PX - 2 * SIDEBAR_MARGIN_PX
 
         y = 18
         # ── Black player ──────────────────────────────────────────────
-        img.put_text(self._player_black, sx, y, 0.65, (200, 200, 255), 2)
+        img.put_text(self._player_black, sx, y, HUD_FONT_SCALE_HEADER, (200, 200, 255), 2)
         y += 24
-        img.put_text(f'Score: {self._black_score}', sx, y, 0.5, TEXT_COLOR, 1)
+        img.put_text(f'Score: {self._black_score}', sx, y, HUD_FONT_SCALE_LABEL, TEXT_COLOR, 1)
         y += 6
-        y = self._draw_captured_row(frame, img, sx, y, self._black_captured, Color.WHITE)
+        y = self._draw_captured_row(img, sx, y, self._black_captured, Color.WHITE)
 
         # ── Separator ─────────────────────────────────────────────────
         y += 6
@@ -156,34 +150,37 @@ class HudRenderer:
         y += 12
 
         # ── Moves log ─────────────────────────────────────────────────
-        img.put_text('Moves', sx, y, 0.55, TEXT_COLOR, 1)
+        img.put_text('Moves', sx, y, HUD_FONT_SCALE_SECTION, TEXT_COLOR, 1)
         y += 18
         col_w = sw // 2
-        img.put_text(self._player_black[:6],  sx,          y, 0.45, (180, 180, 255), 1)
-        img.put_text(self._player_white[:6],  sx + col_w,  y, 0.45, (255, 255, 180), 1)
+        img.put_text(self._player_black[:6], sx,         y, HUD_FONT_SCALE_COLUMN_HEADER, (180, 180, 255), 1)
+        img.put_text(self._player_white[:6], sx + col_w, y, HUD_FONT_SCALE_COLUMN_HEADER, (255, 255, 180), 1)
         y += 16
-        for i in range(10):
+        for i in range(MOVES_LOG_VISIBLE_ROWS):
+            row_y = y + i * MOVES_LOG_ROW_HEIGHT_PX
             if i < len(self._black_moves):
-                img.put_text(self._black_moves[-(i+1)], sx,         y + i*18, 0.4, TEXT_COLOR, 1)
+                img.put_text(self._black_moves[-(i + 1)], sx,         row_y, HUD_FONT_SCALE_MOVE, TEXT_COLOR, 1)
             if i < len(self._white_moves):
-                img.put_text(self._white_moves[-(i+1)], sx+col_w,   y + i*18, 0.4, TEXT_COLOR, 1)
-        y += 10 * 18 + 6
+                img.put_text(self._white_moves[-(i + 1)], sx + col_w, row_y, HUD_FONT_SCALE_MOVE, TEXT_COLOR, 1)
+        y += MOVES_LOG_VISIBLE_ROWS * MOVES_LOG_ROW_HEIGHT_PX + 6
 
         # ── Separator ─────────────────────────────────────────────────
         img.draw_line(sx, y, sx + sw, y, (80, 80, 80), 1)
         y += 12
 
         # ── White player ──────────────────────────────────────────────
-        img.put_text(self._player_white, sx, y, 0.65, (255, 255, 180), 2)
+        img.put_text(self._player_white, sx, y, HUD_FONT_SCALE_HEADER, (255, 255, 180), 2)
         y += 24
-        img.put_text(f'Score: {self._white_score}', sx, y, 0.5, TEXT_COLOR, 1)
+        img.put_text(f'Score: {self._white_score}', sx, y, HUD_FONT_SCALE_LABEL, TEXT_COLOR, 1)
         y += 6
-        self._draw_captured_row(frame, img, sx, y, self._white_captured, Color.BLACK)
+        self._draw_captured_row(img, sx, y, self._white_captured, Color.BLACK)
 
-        return frame
+        if self._game_over_message:
+            self._draw_game_over_overlay(img, w, h)
 
-    def _draw_captured_row(self, frame: np.ndarray, img: Img,
-                            sx: int, y: int,
+        return img.img
+
+    def _draw_captured_row(self, img: Img, sx: int, y: int,
                             captured: list[Kind], piece_color: Color) -> int:
         """
         Draw a row of small piece thumbnails for captured pieces.
@@ -192,25 +189,32 @@ class HudRenderer:
         Returns the new y after the row.
         """
         if not captured:
-            return y + _THUMB + 4
+            return y + CAPTURED_THUMB_SIZE_PX + 4
 
-        x = sx
         row_y = y + 4
-        per_row = (SIDEBAR_WIDTH_PX - 28) // (_THUMB + 2)
+        per_row = (SIDEBAR_WIDTH_PX - 2 * SIDEBAR_MARGIN_PX) // (CAPTURED_THUMB_SIZE_PX + 2)
         for i, kind in enumerate(captured):
             if i > 0 and i % per_row == 0:
-                row_y += _THUMB + 2
-            col = sx + (i % per_row) * (_THUMB + 2)
-            thumb = _load_thumb(kind, piece_color)
+                row_y += CAPTURED_THUMB_SIZE_PX + 2
+            col = sx + (i % per_row) * (CAPTURED_THUMB_SIZE_PX + 2)
+            thumb = self._thumbnails.get(kind, piece_color)
             if thumb is not None:
-                # Center thumb in its slot
                 th, tw = thumb.shape[:2]
-                blit_x = col + (_THUMB - tw) // 2
-                blit_y = row_y + (_THUMB - th) // 2
-                _blit(frame, thumb, blit_x, blit_y)
+                blit_x = col + (CAPTURED_THUMB_SIZE_PX - tw) // 2
+                blit_y = row_y + (CAPTURED_THUMB_SIZE_PX - th) // 2
+                img.blit(thumb, blit_x, blit_y)
             else:
                 # Fallback: letter
-                img.put_text(_KIND_CODE[kind], col + 4, row_y + _THUMB - 6, 0.5, TEXT_COLOR, 1)
+                img.put_text(_KIND_CODE[kind], col + 4, row_y + CAPTURED_THUMB_SIZE_PX - 6,
+                             HUD_FONT_SCALE_LABEL, TEXT_COLOR, 1)
 
         rows_used = (len(captured) - 1) // per_row + 1
-        return row_y + rows_used * (_THUMB + 2)
+        return row_y + rows_used * (CAPTURED_THUMB_SIZE_PX + 2)
+
+    def _draw_game_over_overlay(self, img: Img, board_w: int, board_h: int) -> None:
+        """Dim the board area and show the game-over message, centered."""
+        img.fill_rect_blend(0, 0, board_w, board_h, GAME_OVER_OVERLAY_COLOR, GAME_OVER_OVERLAY_ALPHA)
+        text_x = max(0, board_w // 2 - 160)
+        text_y = board_h // 2
+        img.put_text(self._game_over_message, text_x, text_y,
+                     GAME_OVER_FONT_SCALE, GAME_OVER_TEXT_COLOR, 2)

@@ -68,5 +68,8 @@ class JumpCommand(GameCommand):
         if piece is None:
             return CommandResult(False, REASON_EMPTY_SOURCE)
 
+        if arbiter.is_on_cooldown(piece):
+            return CommandResult(False, REASON_MOTION_IN_PROGRESS)
+
         arbiter.start_jump(piece)
         return CommandResult(True, REASON_OK)

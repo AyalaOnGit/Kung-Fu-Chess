@@ -29,11 +29,8 @@ class FrozenSnapshot:
     @staticmethod
     def from_board(board: Board, game_over: bool) -> FrozenSnapshot:
         """Create a frozen snapshot from a Board instance."""
-        # Deep copy the grid
-        pieces_copy = {}
-        for pos, piece in board._grid.items():
-            pieces_copy[pos] = copy.deepcopy(piece)
-        
+        # Deep copy each piece via the public accessor (no reach into Board internals)
+        pieces_copy = {piece.cell: copy.deepcopy(piece) for piece in board.all_pieces()}
         return FrozenSnapshot(pieces=pieces_copy, game_over=game_over)
     
     def piece_at(self, pos: Position) -> Optional[Piece]:
@@ -58,9 +55,12 @@ def diff_snapshots(before: FrozenSnapshot, after: FrozenSnapshot,
     Event types:
       - 'piece_arrived': (piece, dst_pos)
       - 'piece_captured': (piece, capturer, pos)
-      - 'piece_halted': (piece, halted_at)
       - 'promotion': (piece, new_kind)
       - 'game_over': (winner_color, loser_color)
+
+    Note: mid-flight halts (a piece redirected before it arrives) are not
+    visible here — the board grid only changes on arrival. GameFacade
+    detects halts directly from motion data and publishes PieceHalted itself.
     """
     events = []
     

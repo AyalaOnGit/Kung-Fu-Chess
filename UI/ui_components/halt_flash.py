@@ -4,14 +4,15 @@ Halt flash: brief red overlay when a piece is halted mid-flight.
 from __future__ import annotations
 
 from state.game_events import PieceHalted, GameEvent
+from ui_config import HALT_FLASH_DURATION_MS
 
 
 class HaltFlashTracker:
     """
     Subscribes to PieceHalted event and tracks halt flash state.
     """
-    
-    def __init__(self, flash_duration_ms: float = 200.0):
+
+    def __init__(self, flash_duration_ms: float = HALT_FLASH_DURATION_MS):
         self._flash_duration = flash_duration_ms
         self._halted_piece_id: int | None = None
         self._halt_elapsed: float = 0.0

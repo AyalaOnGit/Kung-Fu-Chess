@@ -1,5 +1,5 @@
 """
-Mouse click handler: converts cv2 mouse events to game commands.
+Mouse click handler: converts window mouse events to game commands.
 
 Double-click = two clicks on the SAME cell within DOUBLE_CLICK_MS → jump.
 After a completed move (src→dst), the timer resets so the next click
@@ -8,15 +8,14 @@ on any cell starts fresh and cannot accidentally trigger a jump.
 from __future__ import annotations
 from typing import Callable, Optional
 import time
-import cv2
 
-DOUBLE_CLICK_MS     = 300   # ms between two clicks to count as double-click
-DOUBLE_CLICK_RADIUS = 20    # max pixel distance between the two clicks
+from vendor.img import MouseEventType
+from ui_config import DOUBLE_CLICK_MS, DOUBLE_CLICK_RADIUS_PX
 
 
 class MouseController:
     """
-    Routes cv2 mouse callbacks to click_handler / jump_handler.
+    Routes window mouse callbacks to click_handler / jump_handler.
 
     State machine:
       IDLE                → LEFT_DOWN on A            → SELECTED(A, t)
@@ -34,15 +33,15 @@ class MouseController:
         self._last_x: int = -9999
         self._last_y: int = -9999
 
-    def on_mouse_event(self, event: int, x: int, y: int, flags: int, param) -> None:
+    def on_mouse_event(self, event: MouseEventType, x: int, y: int, flags: int, param) -> None:
         # Native OS double-click (Windows fires this reliably)
-        if event == cv2.EVENT_LBUTTONDBLCLK:
+        if event == MouseEventType.LEFT_DBLCLK:
             self._reset()
             if self._jump_handler:
                 self._jump_handler(x, y)
             return
 
-        if event != cv2.EVENT_LBUTTONDOWN:
+        if event != MouseEventType.LEFT_DOWN:
             return
 
         now_ms = time.monotonic() * 1000.0
@@ -50,7 +49,7 @@ class MouseController:
         dx     = abs(x - self._last_x)
         dy     = abs(y - self._last_y)
 
-        same_spot = dx <= DOUBLE_CLICK_RADIUS and dy <= DOUBLE_CLICK_RADIUS
+        same_spot = dx <= DOUBLE_CLICK_RADIUS_PX and dy <= DOUBLE_CLICK_RADIUS_PX
         fast      = dt <= DOUBLE_CLICK_MS
 
         if same_spot and fast:
