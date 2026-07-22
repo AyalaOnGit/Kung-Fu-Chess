@@ -20,7 +20,7 @@ from ui_config import (
     GAME_OVER_RATING_UP_COLOR, GAME_OVER_RATING_DOWN_COLOR,
 )
 from kungfu_chess.model.piece import Kind, Color
-from ui_components.game_over_banner import GameOverInfo
+from state.game_events import GameOverInfo
 
 # Kind → folder name prefix (matches assets folder names)
 _KIND_CODE = {

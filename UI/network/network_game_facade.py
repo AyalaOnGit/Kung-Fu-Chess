@@ -16,7 +16,6 @@ kungfu_chess.config constants), since the server streams accept/arrive/
 capture events, not per-frame positions.
 """
 from __future__ import annotations
-from dataclasses import dataclass
 from typing import Dict, Optional
 
 from kungfu_chess.config import COOLDOWN_MS, JUMP_DURATION_MS
@@ -32,20 +31,10 @@ from state.game_events import (
     GameEvent, GameOver, MoveAccepted, OpponentDisconnected, PieceArrived,
     PieceCaptured, PieceHalted, Promotion, RatingUpdate,
 )
+from state.motion_tracking import PendingMotionData, pixel_motion_for
 from state.observer import Subject
 
 _ROLE_TO_COLOR = {'white': Color.WHITE, 'black': Color.BLACK}
-
-
-@dataclass
-class PendingMotionData:
-    """Tracks a piece in motion. Mirrors state/game_facade.py's own."""
-    piece: Piece
-    src_pos: Position
-    dst_pos: Position
-    is_jump: bool
-    motion_start_time_ms: float
-    motion_end_time_ms: float
 
 
 def _piece_from_wire(data: Optional[dict]) -> Optional[Piece]:
@@ -286,8 +275,7 @@ class NetworkGameFacade:
         """
         state = data['state']
         fresh_board = board_from_state(state)
-        self._board._grid.clear()
-        self._board._grid.update(fresh_board._grid)
+        self._board.load_snapshot(fresh_board.all_pieces())
         self._pending_motions.clear()
         self._cooldowns.clear()
         self._seed_cooldowns(state)
@@ -308,11 +296,4 @@ class NetworkGameFacade:
         motion_data = self._pending_motions.get(piece_id)
         if not motion_data:
             return None
-
-        elapsed_ms = self._clock_ms - motion_data.motion_start_time_ms
-        src_px = self._mapper.cell_center_pixel(motion_data.src_pos)
-        dst_px = self._mapper.cell_center_pixel(motion_data.dst_pos)
-        duration_ms = float(JUMP_DURATION_MS) if motion_data.is_jump \
-            else duration_for_move_ms(motion_data.src_pos, motion_data.dst_pos)
-
-        return PixelMotion(src_px=src_px, dst_px=dst_px, duration_ms=duration_ms), elapsed_ms
+        return pixel_motion_for(motion_data, self._mapper, self._clock_ms)

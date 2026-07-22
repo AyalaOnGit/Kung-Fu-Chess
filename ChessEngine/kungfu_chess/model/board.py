@@ -47,6 +47,19 @@ class Board:
         """Return all pieces currently on the board."""
         return list(self._grid.values())
 
+    def load_snapshot(self, pieces: list[Piece]) -> None:
+        """
+        Replace all pieces in place, keyed by each piece's own cell.
+
+        For resyncing this Board's contents from a freshly parsed/
+        deserialized snapshot without rebinding the Board instance itself --
+        a caller holding a direct reference to this Board (e.g. a renderer)
+        would otherwise end up rendering a stale snapshot forever.
+        """
+        self._grid.clear()
+        for piece in pieces:
+            self._grid[piece.cell] = piece
+
     # --- Mutation (called only after external validation) ---
 
     def add_piece(self, piece: Piece) -> None:

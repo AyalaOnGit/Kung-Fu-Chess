@@ -8,21 +8,10 @@ on_game_over docstring), so get_info() just reflects whatever has arrived
 so far; the rating lines simply stay blank until RatingUpdate lands.
 """
 from __future__ import annotations
-from dataclasses import dataclass
 from typing import Optional
 
 from kungfu_chess.model.piece import Color
-from state.game_events import GameEvent, GameOver, RatingUpdate
-
-
-@dataclass(frozen=True)
-class GameOverInfo:
-    """Everything HudRenderer needs to draw the end-of-game dialog."""
-    title: str
-    white_label: Optional[str] = None
-    black_label: Optional[str] = None
-    white_delta: Optional[int] = None
-    black_delta: Optional[int] = None
+from state.game_events import GameEvent, GameOver, GameOverInfo, RatingUpdate
 
 
 class GameOverBanner:

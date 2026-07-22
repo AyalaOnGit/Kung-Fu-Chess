@@ -5,6 +5,7 @@ Published by GameFacade and observed by UI components.
 """
 from __future__ import annotations
 from dataclasses import dataclass
+from typing import Optional
 from kungfu_chess.model.position import Position
 from kungfu_chess.model.piece import Piece, Color, Kind
 
@@ -82,6 +83,21 @@ class RatingUpdate:
     white_elo_after: int
     black_elo_before: int
     black_elo_after: int
+
+
+@dataclass(frozen=True)
+class GameOverInfo:
+    """Everything HudRenderer needs to draw the end-of-game dialog.
+
+    Not a GameEvent itself (nothing publishes it) -- ui_components/
+    game_over_banner.py composes it from GameOver + RatingUpdate. Lives
+    here rather than in game_over_banner.py so graphics/hud_renderer.py
+    can depend on state/ for it instead of reaching into ui_components/."""
+    title: str
+    white_label: Optional[str] = None
+    black_label: Optional[str] = None
+    white_delta: Optional[int] = None
+    black_delta: Optional[int] = None
 
 
 # Union type for all possible events

@@ -10,8 +10,6 @@ Responsibilities:
 """
 from __future__ import annotations
 from typing import Optional, Dict
-from dataclasses import dataclass
-from enum import Enum
 
 from kungfu_chess.engine.game_engine import GameEngine
 from kungfu_chess.engine.commands import MoveCommand, JumpCommand
@@ -26,19 +24,9 @@ from state.game_events import (
     MoveAccepted, MoveRejected, PieceArrived, PieceCaptured,
     PieceHalted, Promotion, GameOver, GameEvent
 )
+from state.motion_tracking import PendingMotionData, pixel_motion_for
 from kungfu_chess.observation.snapshot_diff import FrozenSnapshot, diff_snapshots
 from animation.motion_predictor import PixelMotion, duration_for_move_ms
-
-
-@dataclass
-class PendingMotionData:
-    """Tracks a piece in motion."""
-    piece: Piece
-    src_pos: Position
-    dst_pos: Position
-    is_jump: bool
-    motion_start_time_ms: float  # clock_ms when motion began
-    motion_end_time_ms: float    # clock_ms when motion will finish
 
 
 class GameFacade:
@@ -242,21 +230,4 @@ class GameFacade:
         motion_data = self._pending_motions.get(piece_id)
         if not motion_data:
             return None
-
-        elapsed_ms = self._engine.clock_ms - motion_data.motion_start_time_ms
-
-        # src/dst as center-of-cell pixels (with board border offset)
-        src_px_x, src_px_y = self._mapper.cell_center_pixel(motion_data.src_pos)
-        dst_px_x, dst_px_y = self._mapper.cell_center_pixel(motion_data.dst_pos)
-
-        if motion_data.is_jump:
-            duration_ms = float(JUMP_DURATION_MS)
-        else:
-            duration_ms = duration_for_move_ms(motion_data.src_pos, motion_data.dst_pos)
-
-        pixel_motion = PixelMotion(
-            src_px=(src_px_x, src_px_y),
-            dst_px=(dst_px_x, dst_px_y),
-            duration_ms=duration_ms,
-        )
-        return pixel_motion, elapsed_ms
+        return pixel_motion_for(motion_data, self._mapper, self._engine.clock_ms)

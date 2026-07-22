@@ -15,7 +15,7 @@ if str(ui_dir) not in sys.path:
 import server_bridge  # noqa: F401
 
 from graphics.hud_renderer import HudRenderer
-from ui_components.game_over_banner import GameOverInfo
+from state.game_events import GameOverInfo
 
 
 def _blank_board_frame():
