@@ -47,7 +47,7 @@ from audio.sound_manager import SoundManager
 from kungfu_chess.model.piece import Color
 from kungfu_chess.model.board import Board
 
-from kungfu_chess.factory import build_engine
+from kungfu_chess.engine_builder import build_engine
 from kungfu_chess.io.board_factory import standard_board
 from kungfu_chess.interaction.board_mapper import BoardMapper
 

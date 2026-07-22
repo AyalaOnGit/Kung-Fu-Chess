@@ -2,7 +2,7 @@ import unittest
 from kungfu_chess.model.position import Position
 from kungfu_chess.model.piece import Kind
 from kungfu_chess.engine.commands import MoveCommand, JumpCommand
-from kungfu_chess.factory import build_engine
+from kungfu_chess.engine_builder import build_engine
 from tests.conftest import W, B, board_with
 
 

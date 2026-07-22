@@ -1,6 +1,6 @@
 import unittest
 from kungfu_chess.io.board_parser import parse_board
-from kungfu_chess.factory import build_script_runner
+from kungfu_chess.engine_builder import build_script_runner
 
 
 class TestScriptRunner(unittest.TestCase):
