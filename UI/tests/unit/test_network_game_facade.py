@@ -5,15 +5,16 @@ Uses a fake WsClient (no real socket) since ws_client.py's own networking is
 already covered end-to-end by test_ws_client.py -- these tests are about
 NetworkGameFacade's wire-event translation and role gating.
 """
-from kungfu_chess.config import COOLDOWN_MS
+from kungfu_chess.config import COOLDOWN_MS, JUMP_DURATION_MS
 from kungfu_chess.interaction.board_mapper import BoardMapper
 from kungfu_chess.model.piece import Color, Kind, PieceState
 from kungfu_chess.model.position import Position
 
-from network.network_game_facade import NetworkGameFacade
+from network.network_game_facade import NetworkGameFacade, _STALE_MOTION_GRACE_MS
 from network.protocol import Envelope
 from state.game_events import (
-    GameOver, MoveAccepted, OpponentDisconnected, PieceArrived, PieceCaptured, Promotion, RatingUpdate,
+    GameOver, MoveAccepted, OpponentDisconnected, OpponentJoined, PieceArrived, PieceCaptured,
+    Promotion, RatingUpdate,
 )
 
 
@@ -56,9 +57,10 @@ def _mapper():
     return BoardMapper(width=8, height=8, offset_x=0, offset_y=0)
 
 
-def _facade(role='white', state=None, ws=None):
+def _facade(role='white', state=None, ws=None, opponent_present=True):
     ws = ws or _FakeWsClient()
-    facade = NetworkGameFacade(ws, _mapper(), state or _standard_two_king_state(), role)
+    facade = NetworkGameFacade(ws, _mapper(), state or _standard_two_king_state(), role,
+                                opponent_present=opponent_present)
     return facade, ws
 
 
@@ -83,6 +85,36 @@ def test_cannot_select_opponents_piece():
     facade.request_click(10, 710)  # white rook at (7,0)
     assert facade.get_selected_pos() is None
     assert ws.sent == []
+
+
+def test_cannot_select_a_piece_while_waiting_for_opponent():
+    """The room's creator, still alone in the room, must not be able to
+    select or move any piece -- not even their own -- until the second
+    seat is filled."""
+    facade, ws = _facade(role='white', opponent_present=False)
+    handled = facade.request_click(10, 710)  # own rook at (7,0)
+    assert handled is False
+    assert facade.get_selected_pos() is None
+    assert ws.sent == []
+
+
+def test_cannot_jump_while_waiting_for_opponent():
+    facade, ws = _facade(role='white', opponent_present=False)
+    facade.request_jump(10, 710)  # own rook at (7,0)
+    assert ws.sent == []
+
+
+def test_opponent_joined_unblocks_interaction():
+    facade, ws = _facade(role='white', opponent_present=False)
+    ws.queue('opponent_joined', {'role': 'black', 'username': 'bob', 'elo': 1200})
+    facade.tick(16.0)
+
+    facade.request_click(10, 710)  # select own rook at (7,0), now allowed
+    assert facade.get_selected_pos() == Position(7, 0)
+
+    handled = facade.request_click(10, 410)  # destination click
+    assert handled is True
+    assert ws.sent == [('move', {'src': [7, 0], 'dest': [4, 0]})]
 
 
 def test_selecting_own_piece_then_clicking_a_destination_sends_a_move_command():
@@ -171,6 +203,100 @@ def test_piece_captured_publishes_event_without_double_mutating_the_board():
     assert captured_events[0].capturer.id == 3
 
 
+def test_airborne_capture_removes_the_intercepted_piece_from_the_board():
+    """A jump doesn't relocate the jumper -- it intercepts an enemy that
+    tries to arrive on the jumper's cell mid-air. The intercepted piece
+    never gets a paired piece_arrived (it vanishes mid-flight, never
+    landing anywhere), so without an explicit removal here nothing would
+    ever clean it off this mirror board -- it would render frozen at its
+    destination underneath the jumper forever."""
+    state = {
+        'pieces': [
+            _piece_dict(1, 'w', 'K', (7, 4)),
+            _piece_dict(2, 'b', 'K', (0, 4)),
+            _piece_dict(3, 'w', 'R', (7, 0)),  # jumps
+            _piece_dict(4, 'b', 'R', (7, 3)),  # attacks into (7,0), gets intercepted
+        ],
+        'game_over': False,
+        'clock_ms': 0,
+    }
+    facade, ws = _facade(role='white', state=state)
+    events = []
+    facade.subscribe(events.append)
+
+    ws.queue('jump_accepted', {'piece': _piece_dict(3, 'w', 'R', (7, 0)), 'cell': [7, 0]})
+    ws.queue('move_accepted', {'piece': _piece_dict(4, 'b', 'R', (7, 3)), 'src': [7, 3], 'dest': [7, 0]})
+    facade.tick(16.0)
+    # The wire reports the intercepted piece at its own original cell --
+    # it never arrived anywhere else.
+    ws.queue('piece_captured', {
+        'piece': _piece_dict(4, 'b', 'R', (7, 3)), 'capturer': None, 'pos': [7, 3],
+    })
+    facade.tick(16.0)
+
+    assert facade.board.piece_at(Position(7, 3)) is None  # intercepted piece is gone
+    assert facade.board.piece_at(Position(7, 0)).id == 3  # jumper untouched, still there
+    assert facade.get_pending_motion(4) is None  # no leftover animation for the vanished piece
+    captured_events = [e for e in events if isinstance(e, PieceCaptured)]
+    assert len(captured_events) == 1
+    assert captured_events[0].piece.id == 4
+
+
+def test_uneventful_jump_settles_back_to_idle_after_its_duration():
+    """Most jumps intercept nothing -- the server never sends any follow-up
+    event for one that simply completes. Without this client-side timeout
+    (mirroring what RealTimeArbiter itself does authoritatively), the piece
+    and its animation would stay stuck showing JUMPING forever."""
+    facade, ws = _facade(role='white')
+    rook = facade.board.piece_at(Position(7, 0))
+
+    ws.queue('jump_accepted', {'piece': _piece_dict(3, 'w', 'R', (7, 0)), 'cell': [7, 0]})
+    facade.tick(16.0)
+    assert rook.state is PieceState.JUMPING
+    assert facade.get_pending_motion(3) is not None
+
+    facade.tick(JUMP_DURATION_MS + _STALE_MOTION_GRACE_MS + 1.0)
+
+    assert rook.state is PieceState.IDLE
+    assert facade.get_pending_motion(3) is None
+
+
+def test_move_with_no_confirming_event_settles_back_to_idle_eventually():
+    """A 1-cell move fully blocked by a friendly at the last instant is
+    settled back to idle silently server-side (kungfu_chess.realtime's
+    RealTimeArbiter only redirects multi-cell paths early enough to still
+    resolve via a normal arrival) -- no piece_arrived, no piece_captured,
+    nothing on the wire at all. Without this safety net the piece would
+    appear to complete a move it never actually made, then stay frozen
+    there indefinitely."""
+    facade, ws = _facade(role='white')
+    rook = facade.board.piece_at(Position(7, 0))
+
+    ws.queue('move_accepted', {'piece': _piece_dict(3, 'w', 'R', (7, 0)), 'src': [7, 0], 'dest': [7, 1]})
+    facade.tick(16.0)
+    assert rook.state is PieceState.MOVING
+
+    facade.tick(1000.0 + _STALE_MOTION_GRACE_MS + 1.0)  # 1-cell move duration + grace
+
+    assert rook.state is PieceState.IDLE
+    assert facade.get_pending_motion(3) is None
+    assert facade.board.piece_at(Position(7, 0)).id == 3  # never actually relocated
+
+
+def test_in_flight_motion_is_not_cleared_before_its_duration_plus_grace():
+    """Regression guard for the stale-motion safety net itself: a
+    still-legitimately-in-flight motion must not get force-cleared early."""
+    facade, ws = _facade(role='white')
+
+    ws.queue('move_accepted', {'piece': _piece_dict(3, 'w', 'R', (7, 0)), 'src': [7, 0], 'dest': [7, 3]})  # 3000ms
+    facade.tick(16.0)
+
+    facade.tick(2000.0)  # well within 3000ms + grace
+
+    assert facade.get_pending_motion(3) is not None
+    assert facade.board.piece_at(Position(7, 0)).state is PieceState.MOVING
+
+
 def test_promotion_updates_piece_kind_and_publishes_event():
     state = {
         'pieces': [
@@ -227,6 +353,17 @@ def test_opponent_disconnected_publishes_event_with_grace_seconds():
     facade.tick(16.0)
 
     assert events == [OpponentDisconnected(grace_seconds=20.0)]
+
+
+def test_opponent_joined_publishes_event_with_role_username_and_elo():
+    facade, ws = _facade()
+    events = []
+    facade.subscribe(events.append)
+
+    ws.queue('opponent_joined', {'role': 'black', 'username': 'bob', 'elo': 1200})
+    facade.tick(16.0)
+
+    assert events == [OpponentJoined(role='black', username='bob', elo=1200)]
 
 
 def test_state_sync_resync_mutates_the_board_in_place():

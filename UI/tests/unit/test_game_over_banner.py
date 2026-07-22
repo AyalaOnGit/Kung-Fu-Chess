@@ -4,7 +4,7 @@ composes the end-of-game dialog's title (winner) and, once a RatingUpdate
 arrives, each player's new rating and signed ELO change.
 """
 from kungfu_chess.model.piece import Color
-from state.game_events import GameOver, RatingUpdate
+from state.game_events import GameOver, OpponentJoined, RatingUpdate
 from ui_components.game_over_banner import GameOverBanner
 
 
@@ -64,6 +64,26 @@ def test_default_names_are_generic_white_and_black():
     banner.on_event(GameOver(winner=Color.WHITE, loser=Color.BLACK))
 
     assert banner.get_info().title == 'White wins!'
+
+
+def test_opponent_joined_updates_the_black_name_before_game_over():
+    """A room's second seat may still be a 'Waiting for opponent...'
+    placeholder when GameOverBanner is constructed; once the real player
+    joins mid-session, the eventual game-over title must use their name,
+    not the stale placeholder."""
+    banner = GameOverBanner(white_name='alice', black_name='Waiting for opponent...')
+    banner.on_event(OpponentJoined(role='black', username='bob', elo=1200))
+    banner.on_event(GameOver(winner=Color.BLACK, loser=Color.WHITE))
+
+    assert banner.get_info().title == 'bob wins!'
+
+
+def test_opponent_joined_for_white_updates_the_white_name():
+    banner = GameOverBanner(white_name='Waiting for opponent...', black_name='bob')
+    banner.on_event(OpponentJoined(role='white', username='alice', elo=1200))
+    banner.on_event(GameOver(winner=Color.WHITE, loser=Color.BLACK))
+
+    assert banner.get_info().title == 'alice wins!'
 
 
 if __name__ == '__main__':

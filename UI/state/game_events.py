@@ -73,6 +73,16 @@ class OpponentDisconnected:
 
 
 @dataclass
+class OpponentJoined:
+    """A player took the room's other seat (white or black). Only published
+    by NetworkGameFacade -- local hotseat mode has both seats filled from
+    the start, so there's never a seat to wait on."""
+    role: str  # 'white' or 'black'
+    username: str
+    elo: Optional[int]
+
+
+@dataclass
 class RatingUpdate:
     """Both players' ELO before/after a just-recorded rated match result.
     Arrives as its own envelope, separately from (and with no ordering
@@ -103,5 +113,5 @@ class GameOverInfo:
 # Union type for all possible events
 GameEvent = (
     MoveAccepted | MoveRejected | PieceArrived | PieceCaptured |
-    PieceHalted | Promotion | GameOver | OpponentDisconnected | RatingUpdate
+    PieceHalted | Promotion | GameOver | OpponentDisconnected | OpponentJoined | RatingUpdate
 )

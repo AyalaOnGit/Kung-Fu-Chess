@@ -25,6 +25,9 @@ SCALE_MAX     = 2.0
 # Player names
 PLAYER_WHITE = "White"
 PLAYER_BLACK = "Black"
+# Shown instead of PLAYER_BLACK/PLAYER_WHITE while a room's second seat is
+# still empty (networked play only -- local hotseat always has both).
+WAITING_FOR_OPPONENT = "Waiting for opponent..."
 
 # Sidebar layout
 SIDEBAR_WIDTH_PX = 300

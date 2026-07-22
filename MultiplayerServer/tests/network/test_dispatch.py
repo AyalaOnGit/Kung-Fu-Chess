@@ -44,6 +44,20 @@ def _reconnect_state() -> ReconnectState:
     return ReconnectState(clock=FakeClock())
 
 
+class _FakeWebSocket:
+    """A no-op-but-real websocket stand-in: dispatch.py's handlers (e.g.
+    join_room notifying the room's other sessions) call session.websocket
+    .send(...) directly, same as a real connection -- a bare `None` used to
+    work only because no handler actually sent anything to a second
+    session's websocket; opponent_joined broadcasting changed that."""
+
+    def __init__(self):
+        self.sent = []
+
+    async def send(self, raw: str) -> None:
+        self.sent.append(raw)
+
+
 class _Harness:
     """Bundles a RoomManager + SessionManager + dispatch() for one test."""
 
@@ -66,7 +80,7 @@ class _Harness:
         """A session registered in session_manager, same as a real connection
         would be — join_room's role assignment scans session_manager.sessions,
         so tests exercising it need sessions to actually be tracked there."""
-        return self.session_manager.admit(websocket=None)
+        return self.session_manager.admit(websocket=_FakeWebSocket())
 
     def room_with_a_rook(self):
         return self.room_manager.create_room(engine=build_game_stack(_minimal_board()))
@@ -505,6 +519,70 @@ async def test_join_room_records_the_second_player_as_black_in_room_membership()
     await h.dispatch(joiner, json.dumps({'type': 'join_room', 'data': {'room_id': room_id}}))
 
     assert h.room_membership.get(room_id) == (creator.user_id, joiner.user_id)
+
+    await h.room_manager.end_room(room_id)
+
+
+@pytest.mark.asyncio
+async def test_join_room_notifies_the_waiting_creator_via_opponent_joined():
+    """The creator is already sitting in the game screen showing a
+    'waiting for opponent' placeholder -- they need to learn someone
+    joined immediately, not only once the game's board next changes."""
+    h = await _harness()
+    creator = h.new_session()
+    await _register(h, creator, 'alice')
+    create_raw = await h.dispatch(creator, json.dumps({'type': 'create_room', 'data': {}}))
+    room_id = decode(create_raw).data['room_id']
+
+    joiner = h.new_session()
+    await _register(h, joiner, 'bob')
+    await h.dispatch(joiner, json.dumps({'type': 'join_room', 'data': {'room_id': room_id}}))
+
+    assert len(creator.websocket.sent) == 1
+    notification = decode(creator.websocket.sent[0])
+    assert notification.type == 'opponent_joined'
+    assert notification.data == {'role': 'black', 'username': 'bob', 'elo': 1200}  # schema.py's default elo
+
+    await h.room_manager.end_room(room_id)
+
+
+@pytest.mark.asyncio
+async def test_join_room_does_not_notify_the_joiner_themselves():
+    h = await _harness()
+    creator = h.new_session()
+    await _register(h, creator, 'alice')
+    create_raw = await h.dispatch(creator, json.dumps({'type': 'create_room', 'data': {}}))
+    room_id = decode(create_raw).data['room_id']
+
+    joiner = h.new_session()
+    await _register(h, joiner, 'bob')
+    await h.dispatch(joiner, json.dumps({'type': 'join_room', 'data': {'room_id': room_id}}))
+
+    assert joiner.websocket.sent == []  # only the direct room_joined reply, no broadcast to self
+
+    await h.room_manager.end_room(room_id)
+
+
+@pytest.mark.asyncio
+async def test_join_room_as_a_viewer_does_not_notify_anyone():
+    h = await _harness()
+    creator = h.new_session()
+    await _register(h, creator, 'alice')
+    create_raw = await h.dispatch(creator, json.dumps({'type': 'create_room', 'data': {}}))
+    room_id = decode(create_raw).data['room_id']
+
+    black = h.new_session()
+    await _register(h, black, 'bob')
+    await h.dispatch(black, json.dumps({'type': 'join_room', 'data': {'room_id': room_id}}))
+    creator.websocket.sent.clear()
+    black.websocket.sent.clear()
+
+    viewer = h.new_session()
+    await _register(h, viewer, 'carol')
+    await h.dispatch(viewer, json.dumps({'type': 'join_room', 'data': {'room_id': room_id}}))
+
+    assert creator.websocket.sent == []
+    assert black.websocket.sent == []
 
     await h.room_manager.end_room(room_id)
 

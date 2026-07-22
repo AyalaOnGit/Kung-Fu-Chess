@@ -11,7 +11,7 @@ from __future__ import annotations
 from typing import Optional
 
 from kungfu_chess.model.piece import Color
-from state.game_events import GameEvent, GameOver, GameOverInfo, RatingUpdate
+from state.game_events import GameEvent, GameOver, GameOverInfo, OpponentJoined, RatingUpdate
 
 
 class GameOverBanner:
@@ -34,6 +34,11 @@ class GameOverBanner:
         if isinstance(event, GameOver):
             self._game_over = True
             self._winner = event.winner
+        elif isinstance(event, OpponentJoined):
+            if event.role == 'white':
+                self._white_name = event.username
+            elif event.role == 'black':
+                self._black_name = event.username
         elif isinstance(event, RatingUpdate):
             self._white_elo_before = event.white_elo_before
             self._white_elo_after = event.white_elo_after

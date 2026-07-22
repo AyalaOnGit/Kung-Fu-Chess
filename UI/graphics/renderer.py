@@ -45,6 +45,9 @@ class BoardRenderer:
             self._board_img.img = blank
 
         self._animators: Dict[int, PieceAnimator] = {}
+        # The last PieceAnimatorState actually *driven* by piece.state, per
+        # piece id -- see render()'s use of it below.
+        self._driven_anim_state: Dict[int, PieceAnimatorState] = {}
         self._selected_pos: Optional[Position] = None
         self._halted_piece_id: Optional[int] = None
 
@@ -81,8 +84,22 @@ class BoardRenderer:
             pos = piece.cell
             animator = self._get_animator(piece)
             desired  = self._piece_state_to_anim(piece.state)
-            if animator.state != desired:
+            # Compared against the last state *we* drove it to, not
+            # animator.state itself: a one-shot (non-looping) animation like
+            # jump or short_rest auto-transitions to its own resting pose
+            # (next_state_when_finished) once its sprite frames finish
+            # playing, which is typically shorter than piece.state's own
+            # real duration (a jump plays for ~500ms of sprites but stays
+            # PieceState.JUMPING for the full mechanical JUMP_DURATION_MS).
+            # Comparing against animator.state directly would see that
+            # self-transition as a mismatch against the still-unchanged
+            # `desired` and force it right back into JUMPING/SHORT_REST,
+            # restarting the animation from frame 0 -- over and over, for
+            # as long as piece.state doesn't itself change -- instead of
+            # letting it rest naturally until piece.state actually does.
+            if self._driven_anim_state.get(piece.id) != desired:
                 animator.set_state(desired)
+                self._driven_anim_state[piece.id] = desired
             animator.tick(dt_ms)
 
             cw, ch = self._mapper.cell_size(pos)

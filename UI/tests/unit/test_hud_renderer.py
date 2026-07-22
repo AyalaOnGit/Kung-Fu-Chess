@@ -70,6 +70,31 @@ def test_set_game_over_none_clears_it():
     assert frame is not None
 
 
+def test_set_player_updates_black_name_and_elo():
+    hud = HudRenderer(800, 800, player_white='alice', player_black='Waiting for opponent...')
+    hud.set_player('black', 'bob', 1200)
+
+    assert hud._player_black == 'bob'
+    assert hud._black_elo == 1200
+    assert hud._player_white == 'alice'  # untouched
+
+
+def test_set_player_updates_white_name_and_elo():
+    hud = HudRenderer(800, 800, player_white='Waiting for opponent...', player_black='bob')
+    hud.set_player('white', 'alice', 1200)
+
+    assert hud._player_white == 'alice'
+    assert hud._white_elo == 1200
+    assert hud._player_black == 'bob'  # untouched
+
+
+def test_set_player_after_opponent_joins_does_not_crash_on_render():
+    hud = HudRenderer(800, 800, player_white='alice', player_black='Waiting for opponent...')
+    hud.set_player('black', 'bob', 1200)
+    frame = hud.render(_blank_board_frame())
+    assert frame is not None
+
+
 def test_set_my_role_none_clears_it():
     hud = HudRenderer(800, 800)
     hud.set_my_role('black')

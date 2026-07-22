@@ -114,6 +114,17 @@ class HudRenderer:
         """Tell HudRenderer where to find piece sprites for thumbnails."""
         self._thumbnails.set_pieces_dir(path)
 
+    def set_player(self, role: str, name: str, elo: int | None) -> None:
+        """Update one seat's displayed name/elo -- e.g. when a waiting
+        room's second player joins mid-session (see main.py's OpponentJoined
+        handling). role is 'white' or 'black'."""
+        if role == 'white':
+            self._player_white = name
+            self._white_elo = elo
+        elif role == 'black':
+            self._player_black = name
+            self._black_elo = elo
+
     def update_score(self, white_score: int, black_score: int,
                      white_captured: list[Kind] | None = None,
                      black_captured: list[Kind] | None = None) -> None:

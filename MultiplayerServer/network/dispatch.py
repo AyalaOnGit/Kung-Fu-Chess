@@ -27,6 +27,8 @@ import logging
 from dataclasses import dataclass, field
 from typing import Awaitable, Callable, Dict, Optional, Tuple
 
+from websockets.exceptions import ConnectionClosed
+
 from auth import service as auth_service
 from core.protocol import ErrorCode, Envelope, MalformedEnvelopeError, Role, decode, encode
 from db.users_repository import UsersRepository
@@ -243,11 +245,36 @@ async def _handle_join_room(session: ClientSession, ctx: DispatchContext, data: 
         ctx.room_membership.add(room_id, prev_white_id, session.user_id)
 
     session.room_id, session.role = room_id, role
+
+    if role in (Role.WHITE, Role.BLACK):
+        # The other seat's session (if any) is already sitting in the game
+        # screen waiting -- without this, they'd have no way to learn a
+        # second player joined until the next board-changing event (a move),
+        # which may be a long time away, or never if nobody else touches
+        # anything after connecting.
+        await _notify_room_of_new_arrival(ctx, room_id, session, role, joining_user)
+
     return Envelope(type='room_joined', data={
         'room_id': room_id, 'role': role.value, 'state': state_sync_payload(room.engine),
         'white_username': white_username, 'white_elo': white_elo,
         'black_username': black_username, 'black_elo': black_elo,
     })
+
+
+async def _notify_room_of_new_arrival(ctx: DispatchContext, room_id: str, joining_session: ClientSession,
+                                       role: Role, joining_user) -> None:
+    """Tell every other session already in room_id who just took the given
+    seat, so their UI can drop a "waiting for opponent" placeholder for the
+    real name/elo immediately instead of only on the next board change."""
+    envelope = encode(Envelope(type='opponent_joined', data={
+        'role': role.value, 'username': joining_user.username, 'elo': joining_user.elo,
+    }))
+    for other in ctx.session_manager.sessions:
+        if other.room_id == room_id and other is not joining_session:
+            try:
+                await other.websocket.send(envelope)
+            except ConnectionClosed:
+                pass
 
 
 def _next_role_for(session_manager: SessionManager, room_id: str) -> Role:

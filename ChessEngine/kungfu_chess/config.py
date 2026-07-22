@@ -5,7 +5,14 @@ CELL_SIZE_PX    = 100   # pixels per board cell
 PIECE_SPEED_PPS = 100   # pixels per second => 1 cell = 1000 ms
 
 # --- Timing ---
-JUMP_DURATION_MS = 3000  # ms a piece stays airborne during a jump
+# A jump must stay airborne for at least one cell's travel time (1000ms,
+# see PIECE_SPEED_PPS above) for it to ever intercept the fastest possible
+# incoming attack (an adjacent-cell move) -- RealTimeArbiter._active_jump_at
+# requires arrival_time <= landing_time. 1000ms is that floor: fast enough
+# to feel snappy (matches a single-cell move's own speed) while still
+# covering every legal incoming attack, since 1 cell is the minimum any
+# move can take.
+JUMP_DURATION_MS = 1000  # ms a piece stays airborne during a jump
 COOLDOWN_MS     = 1500  # ms a piece must wait after arriving before it can move again
 
 # --- Move result reasons ---

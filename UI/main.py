@@ -28,7 +28,7 @@ if str(ui_dir) not in sys.path:
 import path_bootstrap  # noqa: F401
 
 from ui_config import (WINDOW_TITLE, BOARD_IMAGE_PATH, PIECES_PATH, FPS_TARGET,
-                       PLAYER_WHITE, PLAYER_BLACK,
+                       PLAYER_WHITE, PLAYER_BLACK, WAITING_FOR_OPPONENT,
                        BOARD_OFFSET_X, BOARD_OFFSET_Y,
                        BOARD_COL_BOUNDARIES, BOARD_ROW_BOUNDARIES)
 from graphics.window import Window
@@ -38,6 +38,7 @@ from graphics.hud_renderer import HudRenderer
 from animation.animation_clock import AnimationClock
 from user_input.mouse_controller import MouseController
 from state.game_facade import GameFacade
+from state.game_events import OpponentJoined
 from ui_components.moves_log_panel import MovesLogPanel
 from ui_components.score_panel import ScorePanel
 from ui_components.game_over_banner import GameOverBanner
@@ -88,7 +89,17 @@ def run_network_game(ws_client, mapper: BoardMapper, my_role: str, room_id: str,
     rating shown."""
     from network.network_game_facade import NetworkGameFacade
 
-    facade = NetworkGameFacade(ws_client, mapper, initial_state, my_role)
+    # The room's creator (my_role == 'white') is the only case where the
+    # other seat can still be empty at this point -- a joiner or viewer
+    # always arrives after both relevant seats are already resolved.
+    if my_role == 'white':
+        opponent_present = black_username is not None
+    elif my_role == 'black':
+        opponent_present = white_username is not None
+    else:
+        opponent_present = True
+
+    facade = NetworkGameFacade(ws_client, mapper, initial_state, my_role, opponent_present=opponent_present)
     sound_manager = SoundManager(my_color=facade.my_color)
     network_status_panel = NetworkStatusPanel()
     facade.subscribe(network_status_panel.on_event)
@@ -113,10 +124,18 @@ def _run_game_loop(facade, board: Board, mapper: BoardMapper, sound_manager: Sou
     board_img_path = ui_dir / BOARD_IMAGE_PATH
     sprite_loader = SpriteLoader(pieces_path)
 
+    # Networked play only (my_role is only ever set there): an empty seat
+    # means nobody has joined it yet, not just "unnamed" -- local hotseat
+    # mode has both colors present from the start, so it keeps the plain
+    # White/Black defaults.
+    is_networked = my_role is not None
+    white_fallback = WAITING_FOR_OPPONENT if is_networked else PLAYER_WHITE
+    black_fallback = WAITING_FOR_OPPONENT if is_networked else PLAYER_BLACK
+
     renderer = BoardRenderer(board, sprite_loader, str(board_img_path), facade, mapper)
     hud_renderer = HudRenderer(800, 800,
-                                player_white=white_username or PLAYER_WHITE,
-                                player_black=black_username or PLAYER_BLACK,
+                                player_white=white_username or white_fallback,
+                                player_black=black_username or black_fallback,
                                 white_elo=white_elo, black_elo=black_elo)
     hud_renderer.set_pieces_dir(pieces_path)
     hud_renderer.set_room_id(room_id)
@@ -139,14 +158,24 @@ def _run_game_loop(facade, board: Board, mapper: BoardMapper, sound_manager: Sou
 
     moves_log_panel = MovesLogPanel()
     score_panel = ScorePanel()
-    game_over_banner = GameOverBanner(white_name=white_username or PLAYER_WHITE,
-                                       black_name=black_username or PLAYER_BLACK)
+    game_over_banner = GameOverBanner(white_name=white_username or white_fallback,
+                                       black_name=black_username or black_fallback)
     halt_flash_tracker = HaltFlashTracker()
+
+    def on_opponent_joined(event) -> None:
+        # Drops the "Waiting for opponent..." placeholder for the real
+        # name/elo the instant the server reports someone took the seat --
+        # not on the next board-changing event, which may be a long time
+        # away (or never, if nobody moves again after connecting).
+        if isinstance(event, OpponentJoined):
+            hud_renderer.set_player(event.role, event.username, event.elo)
+
     facade.subscribe(moves_log_panel.on_event)
     facade.subscribe(score_panel.on_event)
     facade.subscribe(game_over_banner.on_event)
     facade.subscribe(halt_flash_tracker.on_event)
     facade.subscribe(sound_manager.on_event)
+    facade.subscribe(on_opponent_joined)
     sound_manager.play_start()
 
     target_frame_ms = 1000.0 / FPS_TARGET

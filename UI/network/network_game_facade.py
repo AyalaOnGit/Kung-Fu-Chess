@@ -28,13 +28,16 @@ from animation.motion_predictor import PixelMotion, duration_for_move_ms
 from network.protocol import Envelope
 from network.ws_client import WsClient
 from state.game_events import (
-    GameEvent, GameOver, MoveAccepted, OpponentDisconnected, PieceArrived,
+    GameEvent, GameOver, MoveAccepted, OpponentDisconnected, OpponentJoined, PieceArrived,
     PieceCaptured, PieceHalted, Promotion, RatingUpdate,
 )
 from state.motion_tracking import PendingMotionData, pixel_motion_for
 from state.observer import Subject
 
 _ROLE_TO_COLOR = {'white': Color.WHITE, 'black': Color.BLACK}
+# Margin added to a pending motion's own predicted duration before treating
+# it as abandoned -- see _resolve_stale_pending_motions.
+_STALE_MOTION_GRACE_MS = 500.0
 
 
 def _piece_from_wire(data: Optional[dict]) -> Optional[Piece]:
@@ -68,13 +71,21 @@ class NetworkGameFacade:
     :param my_role: 'white', 'black', or 'viewer'. Viewers can look but
         request_click/request_jump are no-ops for them, matching the
         server's own viewer_read_only gate.
+    :param opponent_present: False if the room's other seat is still empty
+        (i.e. this is the room's creator, still waiting) -- request_click/
+        request_jump stay no-ops, the same as for a viewer, until an
+        opponent_joined envelope arrives. True for every other case: a
+        viewer or the second player always joins a room with both seats
+        already resolved (see main.py's run_network_game).
     """
 
-    def __init__(self, ws_client: WsClient, mapper: BoardMapper, initial_state: dict, my_role: str):
+    def __init__(self, ws_client: WsClient, mapper: BoardMapper, initial_state: dict, my_role: str,
+                 opponent_present: bool = True):
         self._ws = ws_client
         self._mapper = mapper
         self._my_color: Optional[Color] = _ROLE_TO_COLOR.get(my_role)
         self._is_viewer = self._my_color is None
+        self._opponent_present = opponent_present
 
         self._subject: Subject[GameEvent] = Subject()
         self._selected: Optional[Position] = None
@@ -110,7 +121,7 @@ class NetworkGameFacade:
         """Same selection semantics as kungfu_chess.interaction.controller.Controller,
         against the mirror board, gated to pieces of my_color. Returns True
         if this was a destination click (2nd click)."""
-        if self._is_viewer or not self._mapper.in_bounds_px(x, y):
+        if self._is_viewer or not self._opponent_present or not self._mapper.in_bounds_px(x, y):
             return False
         pos = self._mapper.pixel_to_position(x, y)
 
@@ -132,7 +143,7 @@ class NetworkGameFacade:
         return True
 
     def request_jump(self, x: int, y: int) -> None:
-        if self._is_viewer or not self._mapper.in_bounds_px(x, y):
+        if self._is_viewer or not self._opponent_present or not self._mapper.in_bounds_px(x, y):
             return
         pos = self._mapper.pixel_to_position(x, y)
         piece = self._board.piece_at(pos)
@@ -148,6 +159,7 @@ class NetworkGameFacade:
         self._resolve_expired_cooldowns()
         for envelope in self._ws.poll_events():
             self._handle_envelope(envelope)
+        self._resolve_stale_pending_motions()
 
     def _resolve_expired_cooldowns(self) -> None:
         expired_ids = [pid for pid, end_ms in self._cooldowns.items() if self._clock_ms >= end_ms]
@@ -155,7 +167,37 @@ class NetworkGameFacade:
             del self._cooldowns[piece_id]
             piece = self._find_piece(piece_id)
             if piece is not None and piece.state is PieceState.COOLING:
-                piece.state = PieceState.IDLE
+                piece.settle_idle()
+
+    def _resolve_stale_pending_motions(self) -> None:
+        """
+        Two situations leave a pending motion (and the MOVING/JUMPING state
+        it implies) with no server event to ever clear them: a jump that
+        completes without intercepting anything -- the common case, since
+        only an airborne capture produces an event -- and a 1-cell move
+        fully blocked by a friendly piece at the last instant (kungfu_chess's
+        RealTimeArbiter settles that back to idle silently; only multi-cell
+        paths get redirected early enough to still resolve via a normal
+        arrival). Left alone, the piece would appear stuck mid-animation
+        indefinitely on this client -- most visibly for jumps, which would
+        otherwise loop their airborne animation forever.
+
+        Once a motion has run past its own predicted duration by a grace
+        margin with no confirming piece_arrived/piece_captured, drop the
+        prediction and settle the piece back to idle -- exactly what
+        RealTimeArbiter would already have done authoritatively. Runs after
+        this tick's envelopes are processed, so a real event arriving in
+        the same tick always clears its own motion first; this only ever
+        catches ones nothing has already resolved.
+        """
+        now = self._clock_ms
+        stale_ids = [pid for pid, motion in self._pending_motions.items()
+                     if now >= motion.motion_end_time_ms + _STALE_MOTION_GRACE_MS]
+        for piece_id in stale_ids:
+            del self._pending_motions[piece_id]
+            piece = self._find_piece(piece_id)
+            if piece is not None and piece.state in (PieceState.MOVING, PieceState.JUMPING):
+                piece.settle_idle()
 
     def _find_piece(self, piece_id: int) -> Optional[Piece]:
         for piece in self._board.all_pieces():
@@ -180,6 +222,8 @@ class NetworkGameFacade:
             self._on_game_over(envelope.data)
         elif envelope.type == 'opponent_disconnected':
             self._on_opponent_disconnected(envelope.data)
+        elif envelope.type == 'opponent_joined':
+            self._on_opponent_joined(envelope.data)
         elif envelope.type == 'rating_update':
             self._on_rating_update(envelope.data)
         elif envelope.type == 'state_sync':
@@ -193,7 +237,7 @@ class NetworkGameFacade:
         if piece is None:
             return
         src, dest = Position(*data['src']), Position(*data['dest'])
-        piece.state = PieceState.MOVING
+        piece.begin_move()
         self._start_pending_motion(piece, src, dest, is_jump=False)
         self._subject.publish(MoveAccepted(piece=piece, src_pos=src, dst_pos=dest))
 
@@ -202,7 +246,7 @@ class NetworkGameFacade:
         if piece is None:
             return
         cell = Position(*data['cell'])
-        piece.state = PieceState.JUMPING
+        piece.begin_jump()
         self._start_pending_motion(piece, cell, cell, is_jump=True)
         # No UI event here -- the local GameFacade doesn't publish one for
         # jump acceptance either, only PieceArrived on completion.
@@ -227,15 +271,29 @@ class NetworkGameFacade:
         if piece.cell != actual_pos:
             self._board.move_piece(piece.cell, actual_pos)
 
-        piece.state = PieceState.COOLING
+        piece.begin_cooldown()
         self._cooldowns[piece.id] = self._clock_ms + COOLDOWN_MS
         self._subject.publish(PieceArrived(piece=piece, pos=actual_pos))
 
     def _on_piece_captured(self, data: dict) -> None:
-        # Board mutation already happened via the paired piece_arrived
-        # (Board.move_piece implicitly evicts whatever occupied the
-        # destination cell) -- this event is purely informational, for
-        # ScorePanel/SoundManager/move history.
+        """
+        A normal move-into-occupied-cell capture is implicitly cleaned up
+        by the paired piece_arrived event (Board.move_piece overwrites
+        whatever occupied the destination). An airborne-jump capture has
+        no such pair -- the intercepted piece never arrives anywhere, it
+        vanishes mid-flight -- so without this, nothing ever removed it
+        from this mirror board or cleared its pending motion, leaving it
+        rendered frozen at its would-be destination underneath the jumper
+        forever. Removing it here by id is a no-op for the normal case
+        (already evicted by the time this runs) and the fix for the
+        airborne case.
+        """
+        captured_id = data['piece']['id']
+        captured_piece = self._find_piece(captured_id)
+        if captured_piece is not None:
+            self._board.remove_piece(captured_piece.cell)
+        self._pending_motions.pop(captured_id, None)
+
         piece = _piece_from_wire(data['piece'])
         capturer = _piece_from_wire(data['capturer'])
         pos = Position(*data['pos'])
@@ -257,6 +315,12 @@ class NetworkGameFacade:
 
     def _on_opponent_disconnected(self, data: dict) -> None:
         self._subject.publish(OpponentDisconnected(grace_seconds=data.get('grace_seconds', 20.0)))
+
+    def _on_opponent_joined(self, data: dict) -> None:
+        self._opponent_present = True
+        self._subject.publish(OpponentJoined(
+            role=data['role'], username=data['username'], elo=data.get('elo'),
+        ))
 
     def _on_rating_update(self, data: dict) -> None:
         self._subject.publish(RatingUpdate(

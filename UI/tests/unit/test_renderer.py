@@ -16,6 +16,7 @@ from kungfu_chess.model.piece import Piece, Color, Kind, PieceState
 from kungfu_chess.model.position import Position
 
 from animation.motion_predictor import PixelMotion
+from animation.piece_animator import PieceAnimatorState
 from graphics.renderer import BoardRenderer
 from graphics.sprite_loader import SpriteLoader
 
@@ -134,6 +135,34 @@ def test_render_with_a_jumping_piece_does_not_raise(tmp_path):
     frame = renderer.render(dt_ms=16.0)
 
     assert frame is not None
+
+
+def test_one_shot_animation_does_not_restart_after_naturally_finishing(tmp_path):
+    """Regression test: a non-looping animation (jump, short_rest) that
+    finishes its own sprite frames and auto-transitions to its resting
+    pose must not get forced back into the original state by the next
+    render() call just because piece.state hasn't changed yet -- only an
+    actual change in piece.state should retrigger it. Comparing against
+    animator.state (which drifts once it self-transitions) instead of
+    what render() itself last drove it to caused the animation to restart
+    from frame 0 repeatedly, for as long as piece.state stayed the same --
+    this is what made jumps look like they never finished."""
+    _write_sprite_state(tmp_path, 'RW', 'jump', fps=10.0, is_loop=False, next_state='idle')
+    _write_sprite_state(tmp_path, 'RW', 'idle', fps=10.0, is_loop=True, next_state='idle')
+    board = Board(width=8, height=8)
+    piece = Piece(id=1, color=Color.WHITE, kind=Kind.ROOK, cell=Position(0, 0), state=PieceState.JUMPING)
+    board.add_piece(piece)
+    renderer = _renderer(board, tmp_path)
+
+    renderer.render(dt_ms=16.0)  # first frame: animator driven into JUMPING
+    animator = renderer._animators[1]
+    assert animator.state == PieceAnimatorState.JUMPING
+
+    renderer.render(dt_ms=200.0)  # single 100ms frame's worth -> auto-transitions to idle
+    assert animator.state == PieceAnimatorState.IDLE
+
+    renderer.render(dt_ms=16.0)  # piece.state is STILL JUMPING -- must not restart
+    assert animator.state == PieceAnimatorState.IDLE
 
 
 def test_missing_sprites_falls_back_gracefully_without_raising(tmp_path):
