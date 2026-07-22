@@ -11,7 +11,7 @@ import copy
 from dataclasses import dataclass
 from typing import Optional
 from kungfu_chess.model.board import Board
-from kungfu_chess.model.piece import Piece, Color
+from kungfu_chess.model.piece import Piece, Kind, Color
 from kungfu_chess.model.position import Position
 
 
@@ -100,7 +100,6 @@ def diff_snapshots(before: FrozenSnapshot, after: FrozenSnapshot,
         black_king = None
         
         for piece in after.all_pieces():
-            from kungfu_chess.model.piece import Kind, Color
             if piece.kind == Kind.KING:
                 if piece.color == Color.WHITE:
                     white_king = piece

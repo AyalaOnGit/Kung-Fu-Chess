@@ -113,6 +113,17 @@ class TestGameEngine(unittest.TestCase):
         engine.wait(3000)
         self.assertTrue(engine.game_over)
 
+    def test_non_king_capture_does_not_set_game_over(self):
+        """RealTimeArbiter reports every capture via on_piece_captured;
+        GameEngine is the layer that decides a capture only ends the game
+        if the captured piece is a king (Piece.is_royal)."""
+        attacker = W(Kind.ROOK, 0, 0)
+        rook     = B(Kind.ROOK, 0, 3)
+        b, engine = self._make(attacker, rook)
+        self._move(engine, Position(0, 0), Position(0, 3))
+        engine.wait(3000)
+        self.assertFalse(engine.game_over)
+
 
 if __name__ == '__main__':
     unittest.main()

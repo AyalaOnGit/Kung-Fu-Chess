@@ -56,6 +56,32 @@ class TestPiece(unittest.TestCase):
         p.try_promote(8)
         self.assertEqual(p.kind, Kind.PAWN)
 
+    def test_begin_move_sets_moving(self):
+        p = W(Kind.ROOK, 0, 0)
+        p.begin_move()
+        self.assertEqual(p.state, PieceState.MOVING)
+
+    def test_begin_jump_sets_jumping(self):
+        p = W(Kind.ROOK, 0, 0)
+        p.begin_jump()
+        self.assertEqual(p.state, PieceState.JUMPING)
+
+    def test_begin_cooldown_sets_cooling(self):
+        p = W(Kind.ROOK, 0, 0)
+        p.begin_cooldown()
+        self.assertEqual(p.state, PieceState.COOLING)
+
+    def test_settle_idle_sets_idle(self):
+        p = W(Kind.ROOK, 0, 0)
+        p.begin_move()
+        p.settle_idle()
+        self.assertEqual(p.state, PieceState.IDLE)
+
+    def test_mark_captured_sets_captured(self):
+        p = W(Kind.ROOK, 0, 0)
+        p.mark_captured()
+        self.assertEqual(p.state, PieceState.CAPTURED)
+
 
 class TestBoard(unittest.TestCase):
     def test_dimensions_inferred(self):
@@ -105,6 +131,22 @@ class TestBoard(unittest.TestCase):
         self.assertTrue(b.in_bounds(Position(0, 0)))
         self.assertFalse(b.in_bounds(Position(4, 0)))
         self.assertFalse(b.in_bounds(Position(0, 4)))
+
+    def test_load_snapshot_replaces_all_pieces(self):
+        old_piece = W(Kind.ROOK, 0, 0)
+        b = board_with(old_piece)
+        new_piece = B(Kind.QUEEN, 3, 3)
+
+        b.load_snapshot([new_piece])
+
+        self.assertIsNone(b.piece_at(Position(0, 0)))
+        self.assertEqual(b.piece_at(Position(3, 3)), new_piece)
+        self.assertEqual(b.all_pieces(), [new_piece])
+
+    def test_load_snapshot_on_empty_board_clears_it(self):
+        b = board_with(W(Kind.ROOK, 0, 0))
+        b.load_snapshot([])
+        self.assertEqual(b.all_pieces(), [])
 
 
 if __name__ == '__main__':
