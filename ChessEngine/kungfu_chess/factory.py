@@ -16,7 +16,7 @@ def build_engine(board: Board, cooldown_ms: int = COOLDOWN_MS) -> GameEngine:
     engine  = GameEngine.__new__(GameEngine)
     arbiter = RealTimeArbiter(
         board,
-        on_king_captured=engine._on_king_captured,
+        on_piece_captured=engine._on_piece_captured,
         on_piece_arrived=engine._on_piece_arrived,
         cooldown_ms=cooldown_ms,
     )

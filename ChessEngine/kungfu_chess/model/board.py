@@ -1,7 +1,7 @@
 from __future__ import annotations
 from typing import Optional
 from kungfu_chess.model.position import Position
-from kungfu_chess.model.piece import Piece, PieceState
+from kungfu_chess.model.piece import Piece
 
 
 class BoardError(Exception):
@@ -68,7 +68,7 @@ class Board:
         piece = self._grid.pop(pos, None)
         if piece is None:
             raise BoardError(f"No piece at {pos} to remove.")
-        piece.state = PieceState.CAPTURED
+        piece.mark_captured()
 
     def move_piece(self, src: Position, dest: Position) -> None:
         """
@@ -84,6 +84,6 @@ class Board:
             raise BoardError(f"No piece at {src} to move.")
         existing = self._grid.get(dest)
         if existing is not None:
-            existing.state = PieceState.CAPTURED
+            existing.mark_captured()
         piece.cell = dest
         self._grid[dest] = piece

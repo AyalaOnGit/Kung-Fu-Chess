@@ -98,23 +98,19 @@ class GameEngine:
             if new_dest is not None and new_dest != motion.dest:
                 self._arbiter.redirect_motion(motion, new_dest)
 
-    def _on_king_captured(self) -> None:
-        self._state.game_over = True
+    def _on_piece_captured(self, piece: Piece) -> None:
+        """Notified for every capture; only ending the game for a king is
+        chess-specific knowledge, so it lives here rather than in the
+        rule-agnostic RealTimeArbiter."""
+        if Piece.is_royal(piece.kind):
+            self._state.game_over = True
 
     def _on_piece_arrived(self, piece: Piece) -> None:
         piece.try_promote(self._state.board.height)
 
     def get_cooldown_ratio(self, piece) -> float:
         """Return fraction of cooldown remaining for piece (1.0=just started, 0.0=done)."""
-        from kungfu_chess.config import COOLDOWN_MS
-        from kungfu_chess.model.piece import PieceState
-        if piece.state is not PieceState.COOLING:
-            return 0.0
-        for c in self._arbiter._cooldowns:
-            if c.piece is piece:
-                remaining = c.ready_time - self._arbiter.clock_ms
-                return max(0.0, min(1.0, remaining / COOLDOWN_MS))
-        return 0.0
+        return self._arbiter.cooldown_ratio_for(piece)
 
     def force_game_over(self) -> None:
         """Force game_over state — intended for testing only."""

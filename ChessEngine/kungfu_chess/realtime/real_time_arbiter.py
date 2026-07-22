@@ -15,18 +15,20 @@ class RealTimeArbiter:
       - Store active motions and jumps outside Board.
       - Resolve arrivals: remove from source, capture at dest, place at dest.
       - Resolve airborne captures: enemy arriving at a jumping piece's cell is captured.
-      - Report king captures via on_king_captured callback.
+      - Report every capture via on_piece_captured callback -- deciding whether
+        a given capture ends the game (e.g. a king) is the caller's concern,
+        not this class's; it has no notion of "royal" pieces.
       - Expose whether any motion is currently active (for GameEngine policy).
 
     Does not contain chess legality logic, rendering, or input handling.
     """
 
-    def __init__(self, board: Board, on_king_captured: Callable[[], None],
+    def __init__(self, board: Board, on_piece_captured: Callable[[Piece], None],
                  on_piece_arrived: Callable[[Piece], None],
                  cooldown_ms: int = COOLDOWN_MS,
                  jump_duration_ms: int = JUMP_DURATION_MS):
         self._board             = board
-        self._on_king_captured  = on_king_captured
+        self._on_piece_captured = on_piece_captured
         self._on_piece_arrived  = on_piece_arrived
         self._cooldown_ms       = cooldown_ms
         self._jump_duration_ms  = jump_duration_ms
@@ -65,7 +67,7 @@ class RealTimeArbiter:
         Duration is determined by cell-step count × 1000 ms.
         """
         duration = travel_duration_ms(src, dest)
-        piece.state = PieceState.MOVING
+        piece.begin_move()
         self._motions.append(Motion(
             piece=piece,
             src=src,
@@ -110,7 +112,7 @@ class RealTimeArbiter:
 
         The piece remains logically on its cell for JUMP_DURATION_MS.
         """
-        piece.state = PieceState.JUMPING
+        piece.begin_jump()
         self._jumps.append(JumpMotion(
             piece=piece,
             cell=piece.cell,
@@ -120,6 +122,16 @@ class RealTimeArbiter:
     def is_on_cooldown(self, piece: Piece) -> bool:
         """Return True if piece is currently in its post-arrival cooldown."""
         return any(c.piece is piece for c in self._cooldowns)
+
+    def cooldown_ratio_for(self, piece: Piece) -> float:
+        """Return fraction of cooldown remaining for piece (1.0=just started, 0.0=done)."""
+        if piece.state is not PieceState.COOLING:
+            return 0.0
+        for c in self._cooldowns:
+            if c.piece is piece:
+                remaining = c.ready_time - self._clock_ms
+                return max(0.0, min(1.0, remaining / COOLDOWN_MS))
+        return 0.0
 
     def advance_time(self, ms: int) -> None:
         """
@@ -144,7 +156,7 @@ class RealTimeArbiter:
 
     def _start_cooldown(self, piece: Piece, from_time: int) -> None:
         """Put piece into COOLING state for COOLDOWN_MS after from_time."""
-        piece.state = PieceState.COOLING
+        piece.begin_cooldown()
         self._cooldowns.append(CooldownTimer(piece=piece, ready_time=from_time + self._cooldown_ms))
 
     def _bounce(self, motion: Motion) -> None:
@@ -172,9 +184,8 @@ class RealTimeArbiter:
         if jump is None:
             return False
         self._board.remove_piece(motion.src)
-        motion.piece.state = PieceState.CAPTURED
-        if Piece.is_royal(motion.piece.kind):
-            self._on_king_captured()
+        motion.piece.mark_captured()
+        self._on_piece_captured(motion.piece)
         return True
 
     def _is_blocked_by_friendly(self, motion: Motion) -> bool:
@@ -184,12 +195,12 @@ class RealTimeArbiter:
             return False
         stop = self._cell_before_dest(motion)
         if stop == motion.src:
-            motion.piece.state = PieceState.IDLE
+            motion.piece.settle_idle()
         else:
             self._board.move_piece(motion.src, stop)
             self._start_cooldown(motion.piece, motion.arrival_time)
             if motion.piece.state is not PieceState.COOLING:
-                motion.piece.state = PieceState.IDLE
+                motion.piece.settle_idle()
             self._on_piece_arrived(motion.piece)
         return True
 
@@ -210,10 +221,10 @@ class RealTimeArbiter:
         self._board.move_piece(motion.src, motion.dest)
         self._start_cooldown(motion.piece, motion.arrival_time)
         if motion.piece.state is not PieceState.COOLING:
-            motion.piece.state = PieceState.IDLE
+            motion.piece.settle_idle()
         self._on_piece_arrived(motion.piece)
-        if captured is not None and Piece.is_royal(captured.kind):
-            self._on_king_captured()
+        if captured is not None:
+            self._on_piece_captured(captured)
 
     def _active_jump_at(self, cell: Position, arrival_time: int, arriving_piece: Piece) -> Optional[JumpMotion]:
         """Return an enemy JumpMotion at cell that is still airborne at arrival_time, or None."""
@@ -231,7 +242,7 @@ class RealTimeArbiter:
         for j in self._jumps:
             if self._clock_ms >= j.landing_time:
                 if j.piece.state is PieceState.JUMPING:
-                    j.piece.state = PieceState.IDLE
+                    j.piece.settle_idle()
             else:
                 active.append(j)
         self._jumps = active
@@ -242,7 +253,7 @@ class RealTimeArbiter:
         for c in self._cooldowns:
             if self._clock_ms >= c.ready_time:
                 if c.piece.state is PieceState.COOLING:
-                    c.piece.state = PieceState.IDLE
+                    c.piece.settle_idle()
             else:
                 active.append(c)
         self._cooldowns = active

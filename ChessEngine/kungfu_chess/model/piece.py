@@ -61,6 +61,26 @@ class Piece:
         """Return True if capturing this kind ends the game."""
         return kind is Kind.KING
 
+    def begin_move(self) -> None:
+        """Transition to MOVING: the piece has started sliding toward a destination."""
+        self.state = PieceState.MOVING
+
+    def begin_jump(self) -> None:
+        """Transition to JUMPING: the piece is airborne over its own cell."""
+        self.state = PieceState.JUMPING
+
+    def begin_cooldown(self) -> None:
+        """Transition to COOLING: just arrived, cannot move again until cooldown expires."""
+        self.state = PieceState.COOLING
+
+    def settle_idle(self) -> None:
+        """Transition to IDLE: ready to receive a new command."""
+        self.state = PieceState.IDLE
+
+    def mark_captured(self) -> None:
+        """Transition to CAPTURED: removed from play."""
+        self.state = PieceState.CAPTURED
+
     def try_promote(self, board_height: int) -> None:
         """Promote this piece in-place if it has reached its promotion row."""
         target_row = 0 if self.color is Color.WHITE else board_height - 1

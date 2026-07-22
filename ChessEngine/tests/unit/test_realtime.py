@@ -23,7 +23,7 @@ class TestRealTimeArbiter(unittest.TestCase):
         captured = []
         arb = RealTimeArbiter(
             b,
-            on_king_captured=lambda: captured.append(True),
+            on_piece_captured=lambda piece: captured.append(piece),
             on_piece_arrived=lambda piece: piece.try_promote(b.height),
             cooldown_ms=cooldown_ms,
         )
@@ -44,13 +44,24 @@ class TestRealTimeArbiter(unittest.TestCase):
         arb.advance_time(2999)
         self.assertEqual(b.piece_at(Position(0, 0)), p)
 
-    def test_king_capture_triggers_callback(self):
+    def test_capture_triggers_callback_with_the_captured_piece(self):
         attacker = W(Kind.ROOK, 0, 0)
         king     = B(Kind.KING, 0, 3)
         b, arb, captured = self._make(attacker, king)
         arb.start_motion(attacker, Position(0, 0), Position(0, 3))
         arb.advance_time(3000)
-        self.assertTrue(captured)
+        self.assertEqual(captured, [king])
+
+    def test_non_royal_capture_also_triggers_callback(self):
+        """The arbiter is chess-rule-agnostic: it reports every capture, not
+        just kings -- deciding what a capture means (e.g. ending the game)
+        is the caller's job."""
+        attacker = W(Kind.ROOK, 0, 0)
+        rook     = B(Kind.ROOK, 0, 3)
+        b, arb, captured = self._make(attacker, rook)
+        arb.start_motion(attacker, Position(0, 0), Position(0, 3))
+        arb.advance_time(3000)
+        self.assertEqual(captured, [rook])
 
     def test_airborne_captures_arriving_enemy(self):
         jumper = W(Kind.ROOK, 0, 0)
