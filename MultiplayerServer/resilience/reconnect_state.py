@@ -11,7 +11,7 @@ from typing import Dict, List, Optional, Tuple
 from core.clock import Clock
 from network.session import Role
 
-DEFAULT_GRACE_SECONDS = 25.0
+DEFAULT_GRACE_SECONDS = 20.0
 
 
 @dataclass(frozen=True)

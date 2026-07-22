@@ -16,6 +16,7 @@ from db.schema import init_schema
 from db.users_repository import UsersRepository
 from game.results import record_match_result
 from game.rooms import RoomManager
+from game.wire import state_sync_payload
 from matchmaking.matchmaker_loop import MatchmakerLoop
 from matchmaking.queue import MatchmakingQueue
 from network.dispatch import build_dispatcher
@@ -74,19 +75,31 @@ async def run(host: str = HOST, port: int = PORT, db_path: str = DB_PATH) -> Non
         if black_user_id is not None:
             reconnect_state.reclaim(black_user_id)
 
-        # Whoever is still connected in this room (players or viewers)
-        # goes back to unmatched; a disconnected participant's session no
-        # longer exists in session_manager at all.
-        for session in session_manager.sessions:
-            if session.room_id == room_id:
-                session.role, session.room_id = None, None
+        async def _unmatch_and_end_room() -> None:
+            # Deferred as its own task (not run inline) so the room's own
+            # final broadcast -- published moments ago by the same tick
+            # that triggered this callback (e.g. the king-capture's
+            # move_accepted/piece_captured/piece_arrived/game_over batch)
+            # -- gets a real chance to actually reach every session first.
+            # game/rooms.py's broadcaster is a separate queued subscriber
+            # task that filters recipients by session.room_id *at delivery
+            # time*, not at publish time; clearing room_id inline here (as
+            # this used to do) reliably beat that subscriber to the punch,
+            # silently dropping the entire final event batch for every
+            # session in the room. Running on a fresh task instead lets
+            # whatever's already queued ahead of it (the broadcaster's
+            # already-scheduled wakeup from that publish) run first.
+            for session in session_manager.sessions:
+                if session.room_id == room_id:
+                    session.role, session.room_id = None, None
+            await room_manager.end_room(room_id)
 
         # Scheduled, not awaited: this callback can run from inside the
         # room's own tick-loop coroutine (the king-capture path), which
         # can't cancel and await itself (§3.2). resign()'s call path has
         # no such constraint, but using the same safe pattern
         # unconditionally is simpler than special-casing it.
-        asyncio.create_task(room_manager.end_room(room_id))
+        asyncio.create_task(_unmatch_and_end_room())
 
     room_manager = RoomManager(bus, session_manager, on_game_over=on_game_over)
 
@@ -100,8 +113,11 @@ async def run(host: str = HOST, port: int = PORT, db_path: str = DB_PATH) -> Non
         room_players[room.room_id] = (white_user_id, black_user_id)
         white.role, white.room_id = Role.WHITE, room.room_id
         black.role, black.room_id = Role.BLACK, room.room_id
-        await white.websocket.send(encode(Envelope(type='match_found', data={'role': 'white', 'room_id': room.room_id})))
-        await black.websocket.send(encode(Envelope(type='match_found', data={'role': 'black', 'room_id': room.room_id})))
+        state = state_sync_payload(room.engine)
+        await white.websocket.send(encode(Envelope(
+            type='match_found', data={'role': 'white', 'room_id': room.room_id, 'state': state})))
+        await black.websocket.send(encode(Envelope(
+            type='match_found', data={'role': 'black', 'room_id': room.room_id, 'state': state})))
         room.start()
 
     async def on_queue_timeout(user_id: int) -> None:

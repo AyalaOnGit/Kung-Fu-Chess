@@ -180,7 +180,19 @@ class Img:
 
     @staticmethod
     def create_window(title: str) -> None:
-        cv2.namedWindow(title, cv2.WINDOW_NORMAL)
+        # WINDOW_AUTOSIZE (not WINDOW_NORMAL): the window always exactly
+        # matches whatever image imshow() last gave it, and the user can't
+        # drag its border to some other size. Mouse coordinates from cv2
+        # are only ever reported correctly in image-pixel space when that
+        # holds -- letting the window be resized independently of the
+        # image (WINDOW_NORMAL) broke click-to-cell mapping, and this
+        # build's cv2.getWindowImageRect() (tried as a fix) turned out to
+        # report bogus, non-uniformly-scaled dimensions on this backend,
+        # making it worse rather than better. Zoom is still available via
+        # the app's own +/- keys (graphics.window.Window._handle_key),
+        # which resize the *image* before each imshow() -- AUTOSIZE follows
+        # that resize automatically.
+        cv2.namedWindow(title, cv2.WINDOW_AUTOSIZE)
 
     @staticmethod
     def set_mouse_callback(title: str, callback) -> None:
@@ -196,7 +208,7 @@ class Img:
         if self.img is None:
             raise ValueError("Image not loaded.")
         try:
-            cv2.namedWindow(title, cv2.WINDOW_NORMAL)
+            cv2.namedWindow(title, cv2.WINDOW_AUTOSIZE)
             cv2.imshow(title, self.img)
             return True
         except cv2.error:

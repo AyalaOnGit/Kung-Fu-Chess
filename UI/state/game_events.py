@@ -62,8 +62,17 @@ class GameOver:
     loser: Color
 
 
+@dataclass
+class OpponentDisconnected:
+    """The opponent's connection dropped; the server will auto-resign them
+    on its own timer if they don't reconnect within grace_seconds. Only
+    published by NetworkGameFacade (networked play) -- local hotseat mode
+    has no opponent connection to lose."""
+    grace_seconds: float
+
+
 # Union type for all possible events
 GameEvent = (
     MoveAccepted | MoveRejected | PieceArrived | PieceCaptured |
-    PieceHalted | Promotion | GameOver
+    PieceHalted | Promotion | GameOver | OpponentDisconnected
 )

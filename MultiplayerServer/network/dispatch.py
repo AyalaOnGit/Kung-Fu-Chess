@@ -36,6 +36,7 @@ from game.wire import state_sync_payload
 from matchmaking.queue import MatchmakingQueue
 from network.session import ClientSession, Role
 from network.server import SessionManager
+from observability.logging_conf import log_command
 from resilience.reconnect_state import ReconnectState
 
 logger = logging.getLogger(__name__)
@@ -87,6 +88,25 @@ def _credentials(data: dict):
     if not isinstance(username, str) or not username or not isinstance(password, str) or not password:
         return None
     return username, password
+
+
+async def _handle_check_username(_session: ClientSession, ctx: DispatchContext, data: dict) -> Envelope:
+    """
+    Reports whether a username is already registered, so a shell-style
+    client can prompt "enter matching password" vs "choose a password"
+    before asking for one. This doesn't newly expose anything a client
+    couldn't already learn one round-trip earlier by just attempting
+    'register' and reading back a username_taken error -- it's the same
+    bit of information via a more direct question, not a wider one (see
+    auth/service.py's login() docstring for the *separate*, still-intact
+    guarantee: wrong-password vs no-such-user stays indistinguishable).
+    """
+    username = data.get('username')
+    if not isinstance(username, str) or not username:
+        return _error(ErrorCode.MALFORMED_COMMAND)
+
+    existing = await ctx.users_repo.get_by_username(username)
+    return Envelope(type='username_status', data={'username': username, 'exists': existing is not None})
 
 
 async def _handle_register(session: ClientSession, ctx: DispatchContext, data: dict) -> Envelope:
@@ -159,7 +179,9 @@ async def _handle_create_room(session: ClientSession, ctx: DispatchContext, _dat
     room = ctx.room_manager.create_room()
     session.room_id, session.role = room.room_id, Role.WHITE
     room.start()
-    return Envelope(type='room_created', data={'room_id': room.room_id, 'role': Role.WHITE.value})
+    return Envelope(type='room_created', data={
+        'room_id': room.room_id, 'role': Role.WHITE.value, 'state': state_sync_payload(room.engine),
+    })
 
 
 async def _handle_join_room(session: ClientSession, ctx: DispatchContext, data: dict) -> Envelope:
@@ -178,7 +200,9 @@ async def _handle_join_room(session: ClientSession, ctx: DispatchContext, data: 
 
     role = _next_role_for(ctx.session_manager, room_id)
     session.room_id, session.role = room_id, role
-    return Envelope(type='room_joined', data={'room_id': room_id, 'role': role.value})
+    return Envelope(type='room_joined', data={
+        'room_id': room_id, 'role': role.value, 'state': state_sync_payload(room.engine),
+    })
 
 
 def _next_role_for(session_manager: SessionManager, room_id: str) -> Role:
@@ -195,6 +219,7 @@ _HANDLERS: Dict[str, Handler] = {
     'ping': _handle_ping,
     'move': _handle_move,
     'jump': _handle_jump,
+    'check_username': _handle_check_username,
     'register': _handle_register,
     'login': _handle_login,
     'queue_join': _handle_queue_join,
@@ -220,12 +245,18 @@ def build_dispatcher(
         try:
             envelope = decode(raw)
         except MalformedEnvelopeError:
-            return encode(_error(ErrorCode.MALFORMED_COMMAND))
+            response = _error(ErrorCode.MALFORMED_COMMAND)
+            log_command('recv', session.session_id, '<malformed>', {'raw': raw})
+            log_command('sent', session.session_id, response.type, response.data)
+            return encode(response)
+
+        log_command('recv', session.session_id, envelope.type, envelope.data)
 
         handler = _HANDLERS.get(envelope.type)
-        if handler is None:
-            return encode(_error(ErrorCode.UNKNOWN_COMMAND))
+        response = await handler(session, ctx, envelope.data) if handler is not None \
+            else _error(ErrorCode.UNKNOWN_COMMAND)
 
-        return encode(await handler(session, ctx, envelope.data))
+        log_command('sent', session.session_id, response.type, response.data)
+        return encode(response)
 
     return on_message

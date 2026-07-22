@@ -178,6 +178,41 @@ async def test_move_referencing_an_ended_room_returns_not_in_a_match():
     assert envelope.data == {'code': 'not_in_a_match'}
 
 
+# --- check_username ---
+
+@pytest.mark.asyncio
+async def test_check_username_reports_false_for_an_unregistered_name():
+    h = await _harness()
+    session = h.new_session()
+
+    raw = await h.dispatch(session, json.dumps({'type': 'check_username', 'data': {'username': 'nobody'}}))
+
+    envelope = decode(raw)
+    assert envelope.type == 'username_status'
+    assert envelope.data == {'username': 'nobody', 'exists': False}
+
+
+@pytest.mark.asyncio
+async def test_check_username_reports_true_for_a_registered_name():
+    h = await _harness()
+    await _register(h, h.new_session(), 'alice')
+
+    raw = await h.dispatch(h.new_session(), json.dumps({'type': 'check_username', 'data': {'username': 'alice'}}))
+
+    envelope = decode(raw)
+    assert envelope.data == {'username': 'alice', 'exists': True}
+
+
+@pytest.mark.asyncio
+async def test_check_username_rejects_a_missing_username():
+    h = await _harness()
+    session = h.new_session()
+
+    raw = await h.dispatch(session, json.dumps({'type': 'check_username', 'data': {}}))
+
+    assert decode(raw).data == {'code': 'malformed_command'}
+
+
 # --- register/login ---
 
 @pytest.mark.asyncio
@@ -377,6 +412,9 @@ async def test_create_room_makes_the_creator_white_and_starts_the_room():
     assert session.role is Role.WHITE
     assert session.room_id == envelope.data['room_id']
     assert h.room_manager.get(envelope.data['room_id']).is_running
+    # A client (e.g. a viewer joining later, or the UI drawing the board on
+    # entry) needs the starting position without a separate round-trip.
+    assert len(envelope.data['state']['pieces']) == 32  # standard_board()
 
     await h.room_manager.end_room(envelope.data['room_id'])
 
@@ -447,6 +485,25 @@ async def test_join_room_role_progression_white_black_viewer():
     assert decode(third_raw).data['role'] == 'viewer'
 
     await h.room_manager.end_room(room_id)
+
+
+@pytest.mark.asyncio
+async def test_join_room_returns_the_rooms_actual_current_state_not_a_fresh_board():
+    """A late joiner (2nd player, or any viewer) must see the room's real
+    position -- not an assumed standard starting layout -- since the room
+    may already be mid-game by the time they join."""
+    h = await _harness()
+    room = h.room_with_a_rook()  # 3 pieces, not the standard 32
+
+    joiner = h.new_session()
+    await _register(h, joiner, 'bob')
+    raw = await h.dispatch(joiner, json.dumps({'type': 'join_room', 'data': {'room_id': room.room_id}}))
+
+    envelope = decode(raw)
+    assert envelope.type == 'room_joined'
+    assert len(envelope.data['state']['pieces']) == 3
+
+    await h.room_manager.end_room(room.room_id)
 
 
 @pytest.mark.asyncio

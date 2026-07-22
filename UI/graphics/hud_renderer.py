@@ -98,6 +98,9 @@ class HudRenderer:
         self._white_moves: list[str] = []
         self._black_moves: list[str] = []
         self._game_over_message: str | None = None
+        self._room_id: str | None = None
+        self._network_status: str | None = None
+        self._my_role: str | None = None
         self._thumbnails = ThumbnailCache()
 
     def set_pieces_dir(self, path: pathlib.Path) -> None:
@@ -120,6 +123,24 @@ class HudRenderer:
         """Set (or clear, with None) the game-over banner message."""
         self._game_over_message = message
 
+    def set_room_id(self, room_id: str | None) -> None:
+        """Networked play only: room id, shown at the top of the screen per
+        spec ("written on top of the screen")."""
+        self._room_id = room_id
+
+    def set_my_role(self, role: str | None) -> None:
+        """Networked play only: which color/role *this* window's local
+        player controls. Two networked windows on the same desktop are
+        otherwise visually identical (same title, same board) -- this and
+        the window title (see main.py) are what let a player tell them
+        apart instead of accidentally clicking the wrong window."""
+        self._my_role = role
+
+    def set_network_status(self, message: str | None) -> None:
+        """Networked play only: transient status line (e.g. an opponent
+        disconnect auto-resign countdown). None clears it."""
+        self._network_status = message
+
     def render(self, board_frame: np.ndarray) -> np.ndarray:
         h, w = board_frame.shape[:2]
         channels = board_frame.shape[2] if board_frame.ndim > 2 else 1
@@ -137,6 +158,8 @@ class HudRenderer:
         sw = SIDEBAR_WIDTH_PX - 2 * SIDEBAR_MARGIN_PX
 
         y = 18
+        if self._my_role or self._room_id or self._network_status:
+            y = self._draw_network_header(img, sx, y)
         # ── Black player ──────────────────────────────────────────────
         img.put_text(self._player_black, sx, y, HUD_FONT_SCALE_HEADER, (200, 200, 255), 2)
         y += 24
@@ -179,6 +202,25 @@ class HudRenderer:
             self._draw_game_over_overlay(img, w, h)
 
         return img.img
+
+    def _draw_network_header(self, img: Img, sx: int, y: int) -> int:
+        """Your role + room id + any transient network status (disconnect
+        countdown, etc), drawn at the top of the sidebar. Returns the new y."""
+        if self._my_role:
+            role_color = (0, 220, 0) if self._my_role == 'viewer' else (255, 255, 255)
+            img.put_text(f'You are: {self._my_role.upper()}', sx, y,
+                         HUD_FONT_SCALE_HEADER, role_color, 2)
+            y += 22
+        if self._room_id:
+            img.put_text(f'Room: {self._room_id}', sx, y, HUD_FONT_SCALE_LABEL, TEXT_COLOR, 1)
+            y += 18
+        if self._network_status:
+            img.put_text(self._network_status, sx, y, HUD_FONT_SCALE_LABEL, (0, 120, 255), 1)
+            y += 18
+        y += 6
+        img.draw_line(sx, y, sx + SIDEBAR_WIDTH_PX - 2 * SIDEBAR_MARGIN_PX, y, (80, 80, 80), 1)
+        y += 12
+        return y
 
     def _draw_captured_row(self, img: Img, sx: int, y: int,
                             captured: list[Kind], piece_color: Color) -> int:

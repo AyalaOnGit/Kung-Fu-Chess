@@ -44,10 +44,22 @@ class Window:
 
     def _on_mouse(self, event: int, x: int, y: int, flags: int, param: None) -> None:
         """Map scaled pixel coords back to logical coords before forwarding."""
-        if self._mouse_callback:
-            lx = int(x / self._scale)
-            ly = int(y / self._scale)
-            self._mouse_callback(MouseEventType(event), lx, ly, flags, param)
+        if not self._mouse_callback:
+            return
+        try:
+            mouse_event = MouseEventType(event)
+        except ValueError:
+            # cv2 delivers every mouse event through this one callback --
+            # move, wheel scroll, right/middle-click, drag, etc. -- but
+            # MouseEventType only names the 4 this app acts on. Anything
+            # else used to crash the whole render loop (ValueError from the
+            # Enum constructor, uncaught inside cv2's own callback); ignore
+            # it instead, exactly as MouseController already ignores any
+            # recognized-but-unhandled event type below.
+            return
+        lx = int(x / self._scale)
+        ly = int(y / self._scale)
+        self._mouse_callback(mouse_event, lx, ly, flags, param)
 
     def display_frame(self, frame: np.ndarray, fps: Optional[float] = None) -> None:
         """
