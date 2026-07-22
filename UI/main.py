@@ -137,15 +137,11 @@ def _run_game_loop(facade, board: Board, mapper: BoardMapper, sound_manager: Sou
 
     clock = AnimationClock()
 
-    def on_event(event):
-        print(f"Event: {type(event).__name__}: {event}")
-
     moves_log_panel = MovesLogPanel()
     score_panel = ScorePanel()
     game_over_banner = GameOverBanner(white_name=white_username or PLAYER_WHITE,
                                        black_name=black_username or PLAYER_BLACK)
     halt_flash_tracker = HaltFlashTracker()
-    facade.subscribe(on_event)
     facade.subscribe(moves_log_panel.on_event)
     facade.subscribe(score_panel.on_event)
     facade.subscribe(game_over_banner.on_event)
