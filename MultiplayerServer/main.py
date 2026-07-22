@@ -13,7 +13,7 @@ from db.connection import Database
 from db.matches_repository import MatchesRepository
 from db.schema import init_schema
 from db.users_repository import UsersRepository
-from game.results import record_match_result
+from game.rating_service import record_match_result
 from game.room_membership import RoomMembership
 from game.rooms import RoomManager
 from game.wire import state_sync_payload
