@@ -42,10 +42,15 @@ def _load_game_main():
 def main(uri: str = DEFAULT_URI) -> None:
     ws_client, username, resume = connect_and_login(uri)
 
+    white_username = white_elo = black_username = black_elo = None
     if resume is not None:
         # A reconnect within the grace period: the server already rebound
-        # us into our in-progress room -- skip the lobby entirely.
+        # us into our in-progress room -- skip the lobby entirely. The
+        # state_sync reply carries the same rating fields as match_found/
+        # room_joined (opponent fields are None if they're not connected).
         role, room_id, state = resume.data['role'], resume.data['room_id'], resume.data['state']
+        white_username, white_elo = resume.data.get('white_username'), resume.data.get('white_elo')
+        black_username, black_elo = resume.data.get('black_username'), resume.data.get('black_elo')
     else:
         result = run_lobby(ws_client, username)
         if result is None:
@@ -53,6 +58,8 @@ def main(uri: str = DEFAULT_URI) -> None:
             ws_client.close()
             return
         role, room_id, state = result.role, result.room_id, result.state
+        white_username, white_elo = result.white_username, result.white_elo
+        black_username, black_elo = result.black_username, result.black_elo
 
     print(f'Entering room {room_id} as {role}.')
     log_event('entering room %s as %s', room_id, role)
@@ -61,7 +68,9 @@ def main(uri: str = DEFAULT_URI) -> None:
     board_mapper = game_main._build_mapper(game_main.Board(width=8, height=8))
 
     try:
-        game_main.run_network_game(ws_client, board_mapper, role, room_id, state)
+        game_main.run_network_game(ws_client, board_mapper, role, room_id, state,
+                                    white_username=white_username, white_elo=white_elo,
+                                    black_username=black_username, black_elo=black_elo)
     finally:
         ws_client.close()
 

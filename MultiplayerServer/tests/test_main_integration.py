@@ -68,6 +68,24 @@ async def _wait_for(websocket, *types: str, timeout: float = 5.0) -> dict:
     return await asyncio.wait_for(_loop(), timeout=timeout)
 
 
+async def _wait_for_all(websocket, *types: str, timeout: float = 5.0) -> dict:
+    """Like _wait_for, but collects one envelope per type in `types`,
+    keyed by type -- for envelopes whose relative arrival order isn't
+    guaranteed (e.g. game_over's room broadcast vs rating_update's direct
+    send both follow the same king-capture, from different code paths)."""
+    remaining = set(types)
+    found = {}
+
+    async def _loop():
+        while remaining:
+            envelope = await _recv_json(websocket)
+            if envelope['type'] in remaining:
+                found[envelope['type']] = envelope
+                remaining.discard(envelope['type'])
+        return found
+    return await asyncio.wait_for(_loop(), timeout=timeout)
+
+
 @pytest_asyncio.fixture
 async def running_server(monkeypatch):
     """A real MultiplayerServer instance, seeded so a fresh room's two
@@ -115,11 +133,25 @@ async def test_king_capture_broadcasts_game_over_to_both_players(running_server)
         accepted = await _wait_for(white_ws, 'accepted', 'error')
         assert accepted['type'] == 'accepted'
 
-        white_game_over = await _wait_for(white_ws, 'game_over', timeout=5.0)
-        black_game_over = await _wait_for(black_ws, 'game_over', timeout=5.0)
+        # game_over (the room's own broadcast) and rating_update (a separate
+        # direct send once record_match_result finishes its DB round-trip)
+        # both follow the same king-capture, but from different code paths
+        # with no ordering guarantee between them -- collect both rather
+        # than assuming which arrives first.
+        white_results = await _wait_for_all(white_ws, 'game_over', 'rating_update', timeout=5.0)
+        black_results = await _wait_for_all(black_ws, 'game_over', 'rating_update', timeout=5.0)
 
-        assert white_game_over['data'] == {'winner': 'w', 'loser': 'b'}
-        assert black_game_over['data'] == {'winner': 'w', 'loser': 'b'}
+        assert white_results['game_over']['data'] == {'winner': 'w', 'loser': 'b'}
+        assert black_results['game_over']['data'] == {'winner': 'w', 'loser': 'b'}
+
+        # Both fresh accounts start at 1200, so a win/loss between them
+        # moves by the same fixed K-factor amount.
+        expected_rating_data = {
+            'white_elo_before': 1200, 'white_elo_after': 1216,
+            'black_elo_before': 1200, 'black_elo_after': 1184,
+        }
+        assert white_results['rating_update']['data'] == expected_rating_data
+        assert black_results['rating_update']['data'] == expected_rating_data
 
 
 if __name__ == '__main__':

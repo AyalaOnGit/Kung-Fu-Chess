@@ -153,6 +153,13 @@ class Img:
                     cv2.FONT_HERSHEY_SIMPLEX, font_size,
                     color, thickness, cv2.LINE_AA)
 
+    @staticmethod
+    def text_size(txt: str, font_size: float, thickness: int = 1) -> tuple[int, int]:
+        """(width, height) txt would occupy via put_text, in pixels --
+        for centering text without needing an actual image loaded."""
+        (w, h), baseline = cv2.getTextSize(txt, cv2.FONT_HERSHEY_SIMPLEX, font_size, thickness)
+        return w, h + baseline
+
     def draw_rect(self, x1: int, y1: int, x2: int, y2: int,
                    color: tuple, thickness: int = 1) -> "Img":
         """Draw a rectangle on self.img."""

@@ -73,10 +73,19 @@ def run_local_game() -> None:
     _run_game_loop(facade, board, mapper, sound_manager)
 
 
-def run_network_game(ws_client, mapper: BoardMapper, my_role: str, room_id: str, initial_state: dict) -> None:
+def run_network_game(ws_client, mapper: BoardMapper, my_role: str, room_id: str, initial_state: dict,
+                      white_username: Optional[str] = None, white_elo: Optional[int] = None,
+                      black_username: Optional[str] = None, black_elo: Optional[int] = None) -> None:
     """Networked mode: board driven entirely by MultiplayerServer, via
     NetworkGameFacade. Imported lazily to keep the local-only path free of
-    any networking import (websockets isn't needed to play hotseat)."""
+    any networking import (websockets isn't needed to play hotseat).
+
+    white_username/white_elo/black_username/black_elo come from either
+    lobby_window.py's LobbyResult (match_found/room_created/room_joined) or,
+    on a reconnect, straight from the login's state_sync envelope (see
+    play_online.py) -- purely for HUD display, so all four are optional and
+    None just falls back to the generic PLAYER_WHITE/BLACK labels with no
+    rating shown."""
     from network.network_game_facade import NetworkGameFacade
 
     facade = NetworkGameFacade(ws_client, mapper, initial_state, my_role)
@@ -85,12 +94,16 @@ def run_network_game(ws_client, mapper: BoardMapper, my_role: str, room_id: str,
     facade.subscribe(network_status_panel.on_event)
 
     _run_game_loop(facade, facade.board, mapper, sound_manager,
-                    room_id=room_id, my_role=my_role, network_status_panel=network_status_panel)
+                    room_id=room_id, my_role=my_role, network_status_panel=network_status_panel,
+                    white_username=white_username, white_elo=white_elo,
+                    black_username=black_username, black_elo=black_elo)
 
 
 def _run_game_loop(facade, board: Board, mapper: BoardMapper, sound_manager: SoundManager,
                     room_id: Optional[str] = None, my_role: Optional[str] = None,
-                    network_status_panel: Optional[NetworkStatusPanel] = None) -> None:
+                    network_status_panel: Optional[NetworkStatusPanel] = None,
+                    white_username: Optional[str] = None, white_elo: Optional[int] = None,
+                    black_username: Optional[str] = None, black_elo: Optional[int] = None) -> None:
     """Shared render/tick loop for both local and networked play. `facade`
     is a GameFacade or NetworkGameFacade -- both expose the same interface
     (subscribe/request_click/request_jump/tick/get_selected_pos/
@@ -101,7 +114,10 @@ def _run_game_loop(facade, board: Board, mapper: BoardMapper, sound_manager: Sou
     sprite_loader = SpriteLoader(pieces_path)
 
     renderer = BoardRenderer(board, sprite_loader, str(board_img_path), facade, mapper)
-    hud_renderer = HudRenderer(800, 800, player_white=PLAYER_WHITE, player_black=PLAYER_BLACK)
+    hud_renderer = HudRenderer(800, 800,
+                                player_white=white_username or PLAYER_WHITE,
+                                player_black=black_username or PLAYER_BLACK,
+                                white_elo=white_elo, black_elo=black_elo)
     hud_renderer.set_pieces_dir(pieces_path)
     hud_renderer.set_room_id(room_id)
     hud_renderer.set_my_role(my_role)
@@ -126,7 +142,8 @@ def _run_game_loop(facade, board: Board, mapper: BoardMapper, sound_manager: Sou
 
     moves_log_panel = MovesLogPanel()
     score_panel = ScorePanel()
-    game_over_banner = GameOverBanner()
+    game_over_banner = GameOverBanner(white_name=white_username or PLAYER_WHITE,
+                                       black_name=black_username or PLAYER_BLACK)
     halt_flash_tracker = HaltFlashTracker()
     facade.subscribe(on_event)
     facade.subscribe(moves_log_panel.on_event)
@@ -170,9 +187,7 @@ def _run_game_loop(facade, board: Board, mapper: BoardMapper, sound_manager: Sou
                 white_captured=score_panel.get_captured(Color.WHITE),
                 black_captured=score_panel.get_captured(Color.BLACK),
             )
-            hud_renderer.set_game_over(
-                game_over_banner.get_message() if game_over_banner.should_display() else None
-            )
+            hud_renderer.set_game_over(game_over_banner.get_info())
             if network_status_panel is not None:
                 hud_renderer.set_network_status(network_status_panel.get_status_message())
             full_frame = hud_renderer.render(board_frame)

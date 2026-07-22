@@ -28,6 +28,10 @@ class MatchmakingQueue:
         self._elo_range = elo_range
         self._entries: List[_Entry] = []
 
+    @property
+    def elo_range(self) -> int:
+        return self._elo_range
+
     def enqueue(self, user_id: int, elo: int) -> None:
         """Add user_id to the queue. Re-enqueuing resets their join time."""
         self.dequeue(user_id)

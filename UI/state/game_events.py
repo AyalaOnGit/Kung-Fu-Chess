@@ -71,8 +71,21 @@ class OpponentDisconnected:
     grace_seconds: float
 
 
+@dataclass
+class RatingUpdate:
+    """Both players' ELO before/after a just-recorded rated match result.
+    Arrives as its own envelope, separately from (and with no ordering
+    guarantee relative to) GameOver -- see MultiplayerServer/main.py's
+    on_game_over for why. Only published by NetworkGameFacade -- local
+    hotseat mode has no persisted, rated accounts."""
+    white_elo_before: int
+    white_elo_after: int
+    black_elo_before: int
+    black_elo_after: int
+
+
 # Union type for all possible events
 GameEvent = (
     MoveAccepted | MoveRejected | PieceArrived | PieceCaptured |
-    PieceHalted | Promotion | GameOver | OpponentDisconnected
+    PieceHalted | Promotion | GameOver | OpponentDisconnected | RatingUpdate
 )

@@ -35,6 +35,14 @@ class LobbyResult:
     role: str
     room_id: str
     state: dict
+    # Populated from match_found/room_created/room_joined when the server
+    # knows that seat's identity yet; a room-code creator's opponent seat is
+    # still empty (None) until someone joins, since create_room's reply
+    # can't know who -- if anyone -- will join later.
+    white_username: Optional[str] = None
+    white_elo: Optional[int] = None
+    black_username: Optional[str] = None
+    black_elo: Optional[int] = None
 
 
 @dataclass
@@ -47,6 +55,7 @@ class LobbyOutcome:
     error_popup: Optional[str] = None
     queue_reset: bool = False
     queue_reset_status: Optional[str] = None
+    queue_range_text: Optional[str] = None
 
 
 class LobbyController:
@@ -71,8 +80,13 @@ class LobbyController:
         if envelope.type in ('match_found', 'room_created', 'room_joined'):
             result = LobbyResult(
                 role=envelope.data['role'], room_id=envelope.data['room_id'], state=envelope.data['state'],
+                white_username=envelope.data.get('white_username'), white_elo=envelope.data.get('white_elo'),
+                black_username=envelope.data.get('black_username'), black_elo=envelope.data.get('black_elo'),
             )
             return LobbyOutcome(finished=result, room_id_display=envelope.data['room_id'])
+        if envelope.type == 'queued':
+            elo, elo_range = envelope.data['elo'], envelope.data['range']
+            return LobbyOutcome(queue_range_text=f'ELO range {elo - elo_range}-{elo + elo_range}')
         if envelope.type == 'error':
             return self._handle_error(envelope.data.get('code'))
         return LobbyOutcome()
@@ -135,6 +149,7 @@ class _LobbyApp:
 
         self._queued = False
         self._queue_deadline: Optional[float] = None
+        self._queue_range_text = ''
 
         self._root = tk.Tk()
         self._root.title('Kung-Fu Chess -- Lobby')
@@ -163,6 +178,7 @@ class _LobbyApp:
     def _on_play(self) -> None:
         self._controller.play()
         self._queued = True
+        self._queue_range_text = ''
         self._queue_deadline = time.monotonic() + _QUEUE_TIMEOUT_SECONDS
         self._play_button.config(state=tk.DISABLED)
         self._room_button.config(state=tk.DISABLED)
@@ -173,7 +189,8 @@ class _LobbyApp:
         if not self._queued:
             return
         remaining = max(0, int(self._queue_deadline - time.monotonic()))
-        self._status_var.set(f'Searching for an opponent... ({remaining}s)')
+        suffix = f' ({self._queue_range_text})' if self._queue_range_text else ''
+        self._status_var.set(f'Searching for an opponent{suffix}... ({remaining}s)')
         self._root.after(_COUNTDOWN_TICK_MS, self._tick_countdown)
 
     def _on_cancel_queue(self) -> None:
@@ -183,6 +200,7 @@ class _LobbyApp:
     def _apply_queue_reset(self, status: str) -> None:
         self._queued = False
         self._queue_deadline = None
+        self._queue_range_text = ''
         self._status_var.set(status)
         self._play_button.config(state=tk.NORMAL)
         self._room_button.config(state=tk.NORMAL)
@@ -202,6 +220,8 @@ class _LobbyApp:
             self._root.after(_POLL_INTERVAL_MS, self._poll)
 
     def _apply_outcome(self, outcome: LobbyOutcome) -> None:
+        if outcome.queue_range_text is not None:
+            self._queue_range_text = outcome.queue_range_text
         if outcome.room_id_display is not None:
             self._room_id_var.set(f'Room: {outcome.room_id_display}')
         if outcome.queue_reset:

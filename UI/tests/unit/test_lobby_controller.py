@@ -85,6 +85,29 @@ def test_room_joined_produces_a_finished_outcome():
     assert outcome.finished.role == 'viewer'
 
 
+def test_match_found_carries_both_players_username_and_elo_through():
+    controller = LobbyController(_FakeWsClient())
+    envelope = Envelope(type='match_found', data={
+        'role': 'white', 'room_id': 'room-4', 'state': {'pieces': [], 'game_over': False, 'clock_ms': 0},
+        'white_username': 'alice', 'white_elo': 1200, 'black_username': 'bob', 'black_elo': 1215,
+    })
+
+    outcome = controller.handle_envelope(envelope)
+
+    assert outcome.finished.white_username == 'alice' and outcome.finished.white_elo == 1200
+    assert outcome.finished.black_username == 'bob' and outcome.finished.black_elo == 1215
+
+
+def test_queued_produces_an_elo_range_status_text():
+    controller = LobbyController(_FakeWsClient())
+    envelope = Envelope(type='queued', data={'elo': 1200, 'range': 100})
+
+    outcome = controller.handle_envelope(envelope)
+
+    assert outcome.finished is None
+    assert outcome.queue_range_text == 'ELO range 1100-1300'
+
+
 def test_queue_timeout_error_resets_queue_and_shows_info_popup():
     controller = LobbyController(_FakeWsClient())
     envelope = Envelope(type='error', data={'code': 'queue_timeout'})
@@ -119,7 +142,7 @@ def test_already_in_a_room_error_shows_error_popup():
 def test_unrelated_envelope_types_produce_an_empty_outcome():
     controller = LobbyController(_FakeWsClient())
 
-    outcome = controller.handle_envelope(Envelope(type='queued', data={}))
+    outcome = controller.handle_envelope(Envelope(type='pong', data={}))
 
     assert outcome == outcome.__class__()  # every field at its default
 

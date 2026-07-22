@@ -51,8 +51,13 @@ class _Harness:
         self.room_manager = RoomManager(AsyncMessageBus(), self.session_manager, log_events=False)
         self.queue = queue if queue is not None else _queue()
         self.reconnect_state = reconnect_state if reconnect_state is not None else _reconnect_state()
+        # Same dict main.py's on_game_over would read from -- exposed here
+        # so tests can check create_room/join_room actually populate it
+        # (a room whose seats were never recorded silently skips rating).
+        self.room_players = {}
         self.dispatch = build_dispatcher(
             self.room_manager, self.session_manager, users_repo, self.queue, self.reconnect_state,
+            room_players=self.room_players,
         )
 
     def new_session(self) -> ClientSession:
@@ -314,6 +319,36 @@ async def test_login_with_a_pending_reconnect_rebinds_role_and_room_and_returns_
     assert new_socket_session.role is Role.WHITE
     assert new_socket_session.room_id == room.room_id
     assert new_socket_session.user_id not in h.reconnect_state  # one-shot
+    # Own identity resolves via the just-rebound session; the opponent seat
+    # (nobody registered as black in this test) stays unknown.
+    assert envelope.data['white_username'] == 'alice'
+    assert envelope.data['white_elo'] == 1200
+    assert envelope.data['black_username'] is None
+    assert envelope.data['black_elo'] is None
+
+    await h.room_manager.end_room(room.room_id)
+
+
+@pytest.mark.asyncio
+async def test_login_reconnect_state_sync_reports_the_still_connected_opponent_too():
+    h = await _harness()
+    room = h.room_with_a_rook()
+
+    white_original = h.new_session()
+    await _register(h, white_original, 'alice')
+    white_original.role, white_original.room_id = Role.WHITE, room.room_id
+    h.reconnect_state.mark_disconnected(white_original.user_id, Role.WHITE, room.room_id)
+
+    black_session = h.new_session()
+    await _register(h, black_session, 'bob')
+    black_session.role, black_session.room_id = Role.BLACK, room.room_id
+
+    new_socket_session = h.new_session()
+    raw = await h.dispatch(new_socket_session, json.dumps({'type': 'login', 'data': {'username': 'alice', 'password': 'hunter2'}}))
+
+    envelope = decode(raw)
+    assert envelope.data['white_username'] == 'alice' and envelope.data['white_elo'] == 1200
+    assert envelope.data['black_username'] == 'bob' and envelope.data['black_elo'] == 1200
 
     await h.room_manager.end_room(room.room_id)
 
@@ -359,6 +394,18 @@ async def test_queue_join_enqueues_the_logged_in_user_at_their_current_elo():
     envelope = decode(raw)
     assert envelope.type == 'queued'
     assert session.user_id in h.queue
+
+
+@pytest.mark.asyncio
+async def test_queue_join_reports_own_elo_and_the_queues_search_range():
+    h = await _harness(queue=MatchmakingQueue(clock=FakeClock(), elo_range=150))
+    session = h.new_session()
+    await _register(h, session, 'alice')
+
+    raw = await h.dispatch(session, json.dumps({'type': 'queue_join', 'data': {}}))
+
+    envelope = decode(raw)
+    assert envelope.data == {'elo': 1200, 'range': 150}
 
 
 @pytest.mark.asyncio
@@ -415,8 +462,70 @@ async def test_create_room_makes_the_creator_white_and_starts_the_room():
     # A client (e.g. a viewer joining later, or the UI drawing the board on
     # entry) needs the starting position without a separate round-trip.
     assert len(envelope.data['state']['pieces']) == 32  # standard_board()
+    # The creator's own identity is known immediately; the opponent seat is
+    # still empty (HUD display feature) until someone actually joins.
+    assert envelope.data['white_username'] == 'alice'
+    assert envelope.data['white_elo'] == 1200
+    assert envelope.data['black_username'] is None
+    assert envelope.data['black_elo'] is None
 
     await h.room_manager.end_room(envelope.data['room_id'])
+
+
+@pytest.mark.asyncio
+async def test_create_room_records_the_creator_as_white_in_room_players():
+    """room_players is what main.py's on_game_over reads to know who to
+    record a rated result for -- a room whose seats never landed here
+    would silently skip ELO updates for the whole game (the bug this
+    covers: create_room/join_room used to never populate it at all)."""
+    h = await _harness()
+    session = h.new_session()
+    await _register(h, session, 'alice')
+
+    raw = await h.dispatch(session, json.dumps({'type': 'create_room', 'data': {}}))
+    room_id = decode(raw).data['room_id']
+
+    assert h.room_players[room_id] == (session.user_id, None)
+
+    await h.room_manager.end_room(room_id)
+
+
+@pytest.mark.asyncio
+async def test_join_room_records_the_second_player_as_black_in_room_players():
+    h = await _harness()
+    creator = h.new_session()
+    await _register(h, creator, 'alice')
+    create_raw = await h.dispatch(creator, json.dumps({'type': 'create_room', 'data': {}}))
+    room_id = decode(create_raw).data['room_id']
+
+    joiner = h.new_session()
+    await _register(h, joiner, 'bob')
+    await h.dispatch(joiner, json.dumps({'type': 'join_room', 'data': {'room_id': room_id}}))
+
+    assert h.room_players[room_id] == (creator.user_id, joiner.user_id)
+
+    await h.room_manager.end_room(room_id)
+
+
+@pytest.mark.asyncio
+async def test_join_room_as_a_viewer_does_not_touch_room_players():
+    h = await _harness()
+    creator = h.new_session()
+    await _register(h, creator, 'alice')
+    create_raw = await h.dispatch(creator, json.dumps({'type': 'create_room', 'data': {}}))
+    room_id = decode(create_raw).data['room_id']
+
+    black = h.new_session()
+    await _register(h, black, 'bob')
+    await h.dispatch(black, json.dumps({'type': 'join_room', 'data': {'room_id': room_id}}))
+
+    viewer = h.new_session()
+    await _register(h, viewer, 'carol')
+    await h.dispatch(viewer, json.dumps({'type': 'join_room', 'data': {'room_id': room_id}}))
+
+    assert h.room_players[room_id] == (creator.user_id, black.user_id)
+
+    await h.room_manager.end_room(room_id)
 
 
 @pytest.mark.asyncio
@@ -477,7 +586,11 @@ async def test_join_room_role_progression_white_black_viewer():
     second = h.new_session()
     await _register(h, second, 'bob')
     second_raw = await h.dispatch(second, json.dumps({'type': 'join_room', 'data': {'room_id': room_id}}))
-    assert decode(second_raw).data['role'] == 'black'
+    second_data = decode(second_raw).data
+    assert second_data['role'] == 'black'
+    # The joiner learns both seats' identity in one round-trip.
+    assert second_data['white_username'] == 'alice' and second_data['white_elo'] == 1200
+    assert second_data['black_username'] == 'bob' and second_data['black_elo'] == 1200
 
     third = h.new_session()
     await _register(h, third, 'carol')

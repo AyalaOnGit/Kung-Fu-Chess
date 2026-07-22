@@ -61,12 +61,32 @@ async def run(host: str = HOST, port: int = PORT, db_path: str = DB_PATH) -> Non
     async def on_game_over(room_id: str, winner_role: Role, loser_role: Role, reason: str) -> None:
         white_user_id, black_user_id = room_players.pop(room_id, (None, None))
 
-        await record_match_result(
+        rating_change = await record_match_result(
             users_repo, matches_repo,
             white_user_id=white_user_id, black_user_id=black_user_id,
             white_won=(winner_role is Role.WHITE),
             result_reason=reason,
         )
+
+        # A separate direct send, not folded into the room's game_over
+        # broadcast: the engine's GameOver event (winner/loser Color) is
+        # published on the bus well before this callback ever touches the
+        # database, so the ELO deltas simply aren't known yet at that point
+        # -- game/wire.py's event translation has no reason to learn about
+        # users_repo just for this. Both sessions get it if still connected;
+        # a player who already disconnected has nothing to receive it into.
+        if rating_change is not None:
+            rating_envelope = encode(Envelope(type='rating_update', data={
+                'white_elo_before': rating_change.white_elo_before, 'white_elo_after': rating_change.white_elo_after,
+                'black_elo_before': rating_change.black_elo_before, 'black_elo_after': rating_change.black_elo_after,
+            }))
+            for user_id in (white_user_id, black_user_id):
+                recipient = session_manager.get_by_user_id(user_id) if user_id is not None else None
+                if recipient is not None:
+                    try:
+                        await recipient.websocket.send(rating_envelope)
+                    except ConnectionClosed:
+                        pass
 
         # Clear any lingering reconnect entry (e.g. the game ended by
         # capture while the eventual loser was mid-disconnect).
@@ -109,15 +129,24 @@ async def run(host: str = HOST, port: int = PORT, db_path: str = DB_PATH) -> Non
         if white is None or black is None:
             return  # one of them disconnected while queued — drop the pairing
 
+        white_user = await users_repo.get_by_id(white_user_id)
+        black_user = await users_repo.get_by_id(black_user_id)
+
         room = room_manager.create_room()
         room_players[room.room_id] = (white_user_id, black_user_id)
         white.role, white.room_id = Role.WHITE, room.room_id
         black.role, black.room_id = Role.BLACK, room.room_id
         state = state_sync_payload(room.engine)
-        await white.websocket.send(encode(Envelope(
-            type='match_found', data={'role': 'white', 'room_id': room.room_id, 'state': state})))
-        await black.websocket.send(encode(Envelope(
-            type='match_found', data={'role': 'black', 'room_id': room.room_id, 'state': state})))
+        # Both players' username+elo ride along on match_found so the HUD can
+        # show "Player1 (1200) vs Player2 (1215)" from the moment the game
+        # screen opens, without a separate round-trip.
+        common_data = {
+            'room_id': room.room_id, 'state': state,
+            'white_username': white_user.username, 'white_elo': white_user.elo,
+            'black_username': black_user.username, 'black_elo': black_user.elo,
+        }
+        await white.websocket.send(encode(Envelope(type='match_found', data={**common_data, 'role': 'white'})))
+        await black.websocket.send(encode(Envelope(type='match_found', data={**common_data, 'role': 'black'})))
         room.start()
 
     async def on_queue_timeout(user_id: int) -> None:
@@ -150,7 +179,8 @@ async def run(host: str = HOST, port: int = PORT, db_path: str = DB_PATH) -> Non
 
     handler = make_handler(
         session_manager,
-        on_message=build_dispatcher(room_manager, session_manager, users_repo, matchmaking_queue, reconnect_state),
+        on_message=build_dispatcher(room_manager, session_manager, users_repo, matchmaking_queue, reconnect_state,
+                                     room_players=room_players),
         on_disconnect=on_disconnect,
     )
 

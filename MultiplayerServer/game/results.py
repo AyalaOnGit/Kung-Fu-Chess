@@ -6,11 +6,23 @@ This is the callback a Room's on_game_over hook invokes when a game ends
 2 describes, rather than a new mechanism bolted on separately.
 """
 from __future__ import annotations
+from dataclasses import dataclass
 from typing import Optional
 
 from db.matches_repository import MatchesRepository
 from db.users_repository import UsersRepository
 from rating.elo import update_ratings
+
+
+@dataclass(frozen=True)
+class MatchRatingChange:
+    """Before/after ELO for both players in a just-recorded match -- what
+    main.py's on_game_over needs to send clients a 'rating_update' envelope
+    for the end-of-game dialog (see UI/ui_components/game_over_banner.py)."""
+    white_elo_before: int
+    white_elo_after: int
+    black_elo_before: int
+    black_elo_after: int
 
 
 async def record_match_result(
@@ -21,18 +33,19 @@ async def record_match_result(
     black_user_id: Optional[int],
     white_won: bool,
     result_reason: str,
-) -> None:
+) -> Optional[MatchRatingChange]:
     """
     No-op if either player never logged in — only authenticated players get
-    a persisted, rated result. An anonymous match simply isn't recorded.
+    a persisted, rated result. An anonymous match simply isn't recorded,
+    and returns None (no rating change to report).
     """
     if white_user_id is None or black_user_id is None:
-        return
+        return None
 
     white = await users_repo.get_by_id(white_user_id)
     black = await users_repo.get_by_id(black_user_id)
     if white is None or black is None:
-        return
+        return None
 
     white_score = 1.0 if white_won else 0.0
     new_white_elo, new_black_elo = update_ratings(white.elo, black.elo, white_score=white_score)
@@ -46,3 +59,8 @@ async def record_match_result(
     )
     await users_repo.update_elo(white_user_id, new_white_elo)
     await users_repo.update_elo(black_user_id, new_black_elo)
+
+    return MatchRatingChange(
+        white_elo_before=white.elo, white_elo_after=new_white_elo,
+        black_elo_before=black.elo, black_elo_after=new_black_elo,
+    )

@@ -24,8 +24,8 @@ translation from game events/engine state to JSON-safe dicts.
 """
 from __future__ import annotations
 import logging
-from dataclasses import dataclass
-from typing import Awaitable, Callable, Dict, Optional
+from dataclasses import dataclass, field
+from typing import Awaitable, Callable, Dict, Optional, Tuple
 
 from auth import service as auth_service
 from core.protocol import ErrorCode, Envelope, MalformedEnvelopeError, decode, encode
@@ -49,6 +49,12 @@ class DispatchContext:
     users_repo: UsersRepository
     matchmaking_queue: MatchmakingQueue
     reconnect_state: ReconnectState
+    # (white_user_id, black_user_id) per room_id -- the same dict main.py's
+    # on_game_over reads from to know who to record a rated result for.
+    # Matchmade rooms populate it in on_paired; create_room/join_room have
+    # to populate it here instead, since dispatch.py is the only place that
+    # ever learns a manually-created room's seats.
+    room_players: Dict[str, Tuple[Optional[int], Optional[int]]] = field(default_factory=dict)
 
 
 Handler = Callable[[ClientSession, DispatchContext, dict], Awaitable[Envelope]]
@@ -143,10 +149,17 @@ async def _handle_login(session: ClientSession, ctx: DispatchContext, data: dict
         room = ctx.room_manager.get(room_id)
         if room is not None:
             session.role, session.room_id = reclaimed_role, room_id
+            # Session for reclaimed_role is now this session, so this also
+            # picks up our own just-reclaimed identity; the opponent's seat
+            # only resolves if they're still connected (None otherwise).
+            white_username, white_elo = await _identity_for_role(ctx, room_id, Role.WHITE)
+            black_username, black_elo = await _identity_for_role(ctx, room_id, Role.BLACK)
             return Envelope(type='state_sync', data={
                 'role': reclaimed_role.value,
                 'room_id': room_id,
                 'state': state_sync_payload(room.engine),
+                'white_username': white_username, 'white_elo': white_elo,
+                'black_username': black_username, 'black_elo': black_elo,
             })
         # The room already ended before they reconnected (e.g. the other
         # player won in the meantime) — nothing to rebind into, fall
@@ -160,7 +173,9 @@ async def _handle_queue_join(session: ClientSession, ctx: DispatchContext, _data
         return _error(ErrorCode.NOT_AUTHENTICATED)
     user = await ctx.users_repo.get_by_id(session.user_id)
     ctx.matchmaking_queue.enqueue(session.user_id, user.elo)
-    return Envelope(type='queued', data={})
+    # elo/range let the lobby show what band of opponents it's searching
+    # (e.g. "ELO range 1100-1300") -- see lobby_window.py's _tick_countdown.
+    return Envelope(type='queued', data={'elo': user.elo, 'range': ctx.matchmaking_queue.elo_range})
 
 
 async def _handle_queue_cancel(session: ClientSession, ctx: DispatchContext, _data: dict) -> Envelope:
@@ -176,12 +191,27 @@ async def _handle_create_room(session: ClientSession, ctx: DispatchContext, _dat
     if session.room_id is not None:
         return _error(ErrorCode.ALREADY_IN_A_ROOM)
 
+    user = await ctx.users_repo.get_by_id(session.user_id)
     room = ctx.room_manager.create_room()
     session.room_id, session.role = room.room_id, Role.WHITE
+    ctx.room_players[room.room_id] = (session.user_id, None)
     room.start()
     return Envelope(type='room_created', data={
         'room_id': room.room_id, 'role': Role.WHITE.value, 'state': state_sync_payload(room.engine),
+        'white_username': user.username, 'white_elo': user.elo,
+        'black_username': None, 'black_elo': None,
     })
+
+
+async def _identity_for_role(ctx: DispatchContext, room_id: str, role: Role) -> Tuple[Optional[str], Optional[int]]:
+    """(username, elo) of whoever currently holds `role` in room_id, or
+    (None, None) if that seat isn't occupied yet -- used so a join_room
+    reply can report both seats' identities, not just the joiner's own."""
+    existing = next((s for s in ctx.session_manager.sessions if s.room_id == room_id and s.role is role), None)
+    if existing is None or existing.user_id is None:
+        return None, None
+    user = await ctx.users_repo.get_by_id(existing.user_id)
+    return (user.username, user.elo) if user is not None else (None, None)
 
 
 async def _handle_join_room(session: ClientSession, ctx: DispatchContext, data: dict) -> Envelope:
@@ -199,9 +229,23 @@ async def _handle_join_room(session: ClientSession, ctx: DispatchContext, data: 
         return _error(ErrorCode.ROOM_NOT_FOUND)
 
     role = _next_role_for(ctx.session_manager, room_id)
+    white_username, white_elo = await _identity_for_role(ctx, room_id, Role.WHITE)
+    black_username, black_elo = await _identity_for_role(ctx, room_id, Role.BLACK)
+
+    joining_user = await ctx.users_repo.get_by_id(session.user_id)
+    prev_white_id, prev_black_id = ctx.room_players.get(room_id, (None, None))
+    if role is Role.WHITE:
+        white_username, white_elo = joining_user.username, joining_user.elo
+        ctx.room_players[room_id] = (session.user_id, prev_black_id)
+    elif role is Role.BLACK:
+        black_username, black_elo = joining_user.username, joining_user.elo
+        ctx.room_players[room_id] = (prev_white_id, session.user_id)
+
     session.room_id, session.role = room_id, role
     return Envelope(type='room_joined', data={
         'room_id': room_id, 'role': role.value, 'state': state_sync_payload(room.engine),
+        'white_username': white_username, 'white_elo': white_elo,
+        'black_username': black_username, 'black_elo': black_elo,
     })
 
 
@@ -232,14 +276,20 @@ _HANDLERS: Dict[str, Handler] = {
 def build_dispatcher(
     room_manager: RoomManager, session_manager: SessionManager, users_repo: UsersRepository,
     matchmaking_queue: MatchmakingQueue, reconnect_state: ReconnectState,
+    room_players: Optional[Dict[str, Tuple[Optional[int], Optional[int]]]] = None,
 ) -> Callable[[ClientSession, str], Awaitable[str]]:
     """
     Build the on_message callback network/server.py calls for every raw
     message a session sends. Always returns something to send back to the
     sender — malformed envelopes and unrecognized types get an error
     response of their own rather than being silently dropped.
+
+    room_players: pass main.py's own dict so create_room/join_room's writes
+    land in the exact same object its on_game_over reads from -- omitted
+    (tests that don't exercise a rated end-of-game) just gets a private one.
     """
-    ctx = DispatchContext(room_manager, session_manager, users_repo, matchmaking_queue, reconnect_state)
+    ctx = DispatchContext(room_manager, session_manager, users_repo, matchmaking_queue, reconnect_state,
+                           room_players=room_players if room_players is not None else {})
 
     async def on_message(session: ClientSession, raw: str) -> str:
         try:

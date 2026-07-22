@@ -22,7 +22,7 @@ async def test_records_result_and_updates_elo_for_both_players(repos):
     white = await users_repo.create('white_player', 'h', 's')
     black = await users_repo.create('black_player', 'h', 's')
 
-    await record_match_result(
+    rating_change = await record_match_result(
         users_repo, matches_repo,
         white_user_id=white.id, black_user_id=black.id,
         white_won=True, result_reason='king_captured',
@@ -30,6 +30,8 @@ async def test_records_result_and_updates_elo_for_both_players(repos):
 
     assert (await users_repo.get_by_id(white.id)).elo == 1216
     assert (await users_repo.get_by_id(black.id)).elo == 1184
+    assert rating_change.white_elo_before == 1200 and rating_change.white_elo_after == 1216
+    assert rating_change.black_elo_before == 1200 and rating_change.black_elo_after == 1184
 
 
 @pytest.mark.asyncio
@@ -38,7 +40,7 @@ async def test_black_win_updates_elo_the_other_direction(repos):
     white = await users_repo.create('white_player', 'h', 's')
     black = await users_repo.create('black_player', 'h', 's')
 
-    await record_match_result(
+    rating_change = await record_match_result(
         users_repo, matches_repo,
         white_user_id=white.id, black_user_id=black.id,
         white_won=False, result_reason='king_captured',
@@ -46,6 +48,8 @@ async def test_black_win_updates_elo_the_other_direction(repos):
 
     assert (await users_repo.get_by_id(white.id)).elo == 1184
     assert (await users_repo.get_by_id(black.id)).elo == 1216
+    assert rating_change.white_elo_after == 1184
+    assert rating_change.black_elo_after == 1216
 
 
 @pytest.mark.asyncio
@@ -54,10 +58,11 @@ async def test_anonymous_player_skips_persistence_entirely(repos):
     white = await users_repo.create('white_player', 'h', 's')
 
     # black_user_id=None -> never logged in; nothing should be recorded or changed.
-    await record_match_result(
+    rating_change = await record_match_result(
         users_repo, matches_repo,
         white_user_id=white.id, black_user_id=None,
         white_won=True, result_reason='king_captured',
     )
 
     assert (await users_repo.get_by_id(white.id)).elo == 1200
+    assert rating_change is None

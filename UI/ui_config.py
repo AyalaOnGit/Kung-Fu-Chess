@@ -80,7 +80,19 @@ HALT_FLASH_DURATION_MS = 200.0
 GAME_OVER_OVERLAY_COLOR = (0, 0, 0)
 GAME_OVER_OVERLAY_ALPHA = 0.55
 GAME_OVER_TEXT_COLOR = (255, 255, 255, 255)
-GAME_OVER_FONT_SCALE = 1.2
+GAME_OVER_TITLE_FONT_SCALE = 1.1
+GAME_OVER_DETAIL_FONT_SCALE = 0.65
+GAME_OVER_LINE_GAP_PX = 16          # vertical gap between stacked dialog lines
+GAME_OVER_PANEL_COLOR = (30, 30, 30, 255)  # 4-tuple: fill_rect_blend runs on a BGRA
+                                            # image, and a 3-tuple color leaves the
+                                            # rectangle's alpha at 0, blending the
+                                            # "opaque" panel toward transparent
+GAME_OVER_PANEL_ALPHA = 0.85
+GAME_OVER_PANEL_BORDER_COLOR = (110, 110, 110, 255)
+GAME_OVER_PANEL_PADDING_X_PX = 36
+GAME_OVER_PANEL_PADDING_Y_PX = 26
+GAME_OVER_RATING_UP_COLOR = (90, 210, 90, 255)    # BGR: green, ELO gained
+GAME_OVER_RATING_DOWN_COLOR = (80, 90, 220, 255)  # BGR: red, ELO lost
 
 # --- Mouse input ---
 DOUBLE_CLICK_MS = 300      # ms between two clicks to count as a double-click

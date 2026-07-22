@@ -22,7 +22,7 @@ from kungfu_chess.model.position import Position
 from network.network_game_facade import NetworkGameFacade
 from network.protocol import Envelope
 from state.game_events import (
-    GameOver, MoveAccepted, OpponentDisconnected, PieceArrived, PieceCaptured, Promotion,
+    GameOver, MoveAccepted, OpponentDisconnected, PieceArrived, PieceCaptured, Promotion, RatingUpdate,
 )
 
 
@@ -210,6 +210,21 @@ def test_game_over_publishes_event():
     facade.tick(16.0)
 
     assert events == [GameOver(winner=Color.WHITE, loser=Color.BLACK)]
+
+
+def test_rating_update_publishes_event():
+    facade, ws = _facade()
+    events = []
+    facade.subscribe(events.append)
+
+    ws.queue('rating_update', {
+        'white_elo_before': 1200, 'white_elo_after': 1216,
+        'black_elo_before': 1200, 'black_elo_after': 1184,
+    })
+    facade.tick(16.0)
+
+    assert events == [RatingUpdate(white_elo_before=1200, white_elo_after=1216,
+                                    black_elo_before=1200, black_elo_after=1184)]
 
 
 def test_opponent_disconnected_publishes_event_with_grace_seconds():

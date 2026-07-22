@@ -30,7 +30,7 @@ from network.protocol import Envelope
 from network.ws_client import WsClient
 from state.game_events import (
     GameEvent, GameOver, MoveAccepted, OpponentDisconnected, PieceArrived,
-    PieceCaptured, PieceHalted, Promotion,
+    PieceCaptured, PieceHalted, Promotion, RatingUpdate,
 )
 from state.observer import Subject
 
@@ -191,6 +191,8 @@ class NetworkGameFacade:
             self._on_game_over(envelope.data)
         elif envelope.type == 'opponent_disconnected':
             self._on_opponent_disconnected(envelope.data)
+        elif envelope.type == 'rating_update':
+            self._on_rating_update(envelope.data)
         elif envelope.type == 'state_sync':
             self._on_state_sync(envelope.data)
         # Anything else (accepted/error/pong/registered/...) is a direct
@@ -266,6 +268,12 @@ class NetworkGameFacade:
 
     def _on_opponent_disconnected(self, data: dict) -> None:
         self._subject.publish(OpponentDisconnected(grace_seconds=data.get('grace_seconds', 20.0)))
+
+    def _on_rating_update(self, data: dict) -> None:
+        self._subject.publish(RatingUpdate(
+            white_elo_before=data['white_elo_before'], white_elo_after=data['white_elo_after'],
+            black_elo_before=data['black_elo_before'], black_elo_after=data['black_elo_after'],
+        ))
 
     def _on_state_sync(self, data: dict) -> None:
         """

@@ -63,6 +63,12 @@ def test_reenqueue_resets_join_time():
     assert queue.expire(clock.now()) == [1]
 
 
+def test_elo_range_exposes_the_configured_value():
+    queue = MatchmakingQueue(clock=FakeClock(), elo_range=150)
+
+    assert queue.elo_range == 150
+
+
 def test_find_pairings_pairs_entries_within_elo_range():
     clock = FakeClock()
     queue = MatchmakingQueue(clock=clock, elo_range=100)
