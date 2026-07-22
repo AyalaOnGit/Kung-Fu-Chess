@@ -5,10 +5,10 @@ the async Bus.
 kungfu_chess.engine.game_engine.GameEngine has no pub-sub of its own — the
 only notifications it offers are the two constructor-injected callables
 RealTimeArbiter already uses internally for its own bookkeeping (game_over,
-promotion). So, like UI/state/game_facade.py already does for the pygame
-client, EngineEventRelay diffs a FrozenSnapshot of the board before/after
-each tick and infers events from the difference, instead of subscribing to
-anything — there's nothing on the engine side to subscribe to.
+promotion). So, like UI/state/game_facade.py already does for the Img/
+OpenCV-based UI client, EngineEventRelay diffs a FrozenSnapshot of the board
+before/after each tick and infers events from the difference, instead of
+subscribing to anything — there's nothing on the engine side to subscribe to.
 """
 from __future__ import annotations
 import game.engine_path  # noqa: F401  (must run before any kungfu_chess import)
