@@ -12,7 +12,7 @@ ui_dir = pathlib.Path(__file__).parent.parent.parent
 if str(ui_dir) not in sys.path:
     sys.path.insert(0, str(ui_dir))
 
-import server_bridge  # noqa: F401
+import path_bootstrap  # noqa: F401
 
 from kungfu_chess.config import COOLDOWN_MS
 from kungfu_chess.interaction.board_mapper import BoardMapper

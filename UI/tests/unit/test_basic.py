@@ -10,7 +10,7 @@ ui_dir = pathlib.Path(__file__).parent.parent
 if str(ui_dir) not in sys.path:
     sys.path.insert(0, str(ui_dir))
 
-import server_bridge  # noqa: F401
+import path_bootstrap  # noqa: F401
 
 from animation.animation_clock import AnimationClock
 from animation.motion_predictor import interpolate_pixel, PixelMotion, is_motion_complete

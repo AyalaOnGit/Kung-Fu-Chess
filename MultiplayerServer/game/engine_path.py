@@ -1,7 +1,7 @@
 """
 Inserts ChessEngine/ onto sys.path so `import kungfu_chess` resolves.
 
-Mirrors UI/server_bridge.py's identical trick for the Img/OpenCV client:
+Mirrors UI/path_bootstrap.py's identical trick for the Img/OpenCV client:
 MultiplayerServer/ and UI/ are independent top-level packages that both
 depend on ChessEngine/kungfu_chess without it depending on either of them.
 

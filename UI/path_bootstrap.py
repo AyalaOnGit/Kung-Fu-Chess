@@ -1,5 +1,5 @@
 """
-Server bridge: inserts ChessEngine/ onto sys.path.
+Path bootstrap: inserts ChessEngine/ onto sys.path.
 
 Must be imported FIRST, before any model/engine import, to ensure
 the engine modules are available before ui modules try to use them.

@@ -17,7 +17,7 @@ ui_dir = pathlib.Path(__file__).parent
 if str(ui_dir) not in sys.path:
     sys.path.insert(0, str(ui_dir))
 
-import server_bridge  # noqa: F401  -- must run before any kungfu_chess import
+import path_bootstrap  # noqa: F401  -- must run before any kungfu_chess import
 
 from home_shell import DEFAULT_URI, connect_and_login
 from lobby_window import run_lobby
@@ -27,7 +27,7 @@ from observability.logging_conf import log_event
 def _load_game_main():
     """
     Load UI/main.py by explicit file path rather than `import main`: by the
-    time this runs, server_bridge has put ChessEngine/ ahead of UI/ on
+    time this runs, path_bootstrap has put ChessEngine/ ahead of UI/ on
     sys.path (so kungfu_chess resolves), which means a bare `import main`
     would be ambiguous with any top-level main.py ChessEngine/ ever grows --
     they'd share the same top-level module name.

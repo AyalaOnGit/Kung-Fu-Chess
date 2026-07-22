@@ -11,7 +11,7 @@ ui_dir = pathlib.Path(__file__).parent.parent.parent
 if str(ui_dir) not in sys.path:
     sys.path.insert(0, str(ui_dir))
 
-import server_bridge  # noqa: F401
+import path_bootstrap  # noqa: F401
 
 from lobby_window import LobbyController, LobbyResult
 from network.protocol import Envelope

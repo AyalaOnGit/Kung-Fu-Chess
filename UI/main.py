@@ -24,8 +24,8 @@ ui_dir = pathlib.Path(__file__).parent
 if str(ui_dir) not in sys.path:
     sys.path.insert(0, str(ui_dir))
 
-# MUST import server_bridge first, before any server imports
-import server_bridge  # noqa: F401
+# MUST import path_bootstrap first, before any server imports
+import path_bootstrap  # noqa: F401
 
 from ui_config import (WINDOW_TITLE, BOARD_IMAGE_PATH, PIECES_PATH, FPS_TARGET,
                        PLAYER_WHITE, PLAYER_BLACK,
