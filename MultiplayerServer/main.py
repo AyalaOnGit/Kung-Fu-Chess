@@ -20,7 +20,7 @@ from game.wire import state_sync_payload
 from matchmaking.matchmaker_loop import MatchmakerLoop
 from matchmaking.queue import MatchmakingQueue
 from network.dispatch import build_dispatcher
-from network.server import SessionManager, make_handler
+from network.server import SessionManager, build_handler
 from network.session import ClientSession
 from observability.logging_conf import configure_logging
 from resilience.reconnect_loop import ReconnectLoop
@@ -177,7 +177,7 @@ async def run(host: str = HOST, port: int = PORT, db_path: str = DB_PATH) -> Non
     matchmaker = MatchmakerLoop(matchmaking_queue, RealClock(), on_paired, on_queue_timeout)
     reconnect_loop = ReconnectLoop(reconnect_state, RealClock(), on_reconnect_expired)
 
-    handler = make_handler(
+    handler = build_handler(
         session_manager,
         on_message=build_dispatcher(room_manager, session_manager, users_repo, matchmaking_queue, reconnect_state,
                                      room_membership=room_membership),

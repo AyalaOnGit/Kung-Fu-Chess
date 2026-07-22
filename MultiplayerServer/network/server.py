@@ -41,7 +41,7 @@ class SessionManager:
         return list(self._sessions.values())
 
 
-def make_handler(
+def build_handler(
     session_manager: SessionManager,
     on_admit: Optional[Callable[[ClientSession], None]] = None,
     on_message: Optional[Callable[[ClientSession, str], Awaitable[Optional[str]]]] = None,

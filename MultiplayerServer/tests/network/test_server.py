@@ -6,13 +6,13 @@ import pytest_asyncio
 from websockets.asyncio.client import connect
 from websockets.asyncio.server import serve
 
-from network.server import SessionManager, make_handler
+from network.server import SessionManager, build_handler
 
 
 @pytest_asyncio.fixture
 async def running_server():
     session_manager = SessionManager()
-    handler = make_handler(session_manager)
+    handler = build_handler(session_manager)
     async with serve(handler, 'localhost', 0) as server:
         port = server.sockets[0].getsockname()[1]
         yield f'ws://localhost:{port}', session_manager
@@ -76,7 +76,7 @@ async def test_get_by_user_id_finds_a_session_once_its_user_id_is_set(running_se
 async def test_on_admit_hook_fires_once_per_admitted_connection():
     session_manager = SessionManager()
     admitted = []
-    handler = make_handler(session_manager, on_admit=admitted.append)
+    handler = build_handler(session_manager, on_admit=admitted.append)
 
     async with serve(handler, 'localhost', 0) as server:
         port = server.sockets[0].getsockname()[1]
@@ -98,7 +98,7 @@ async def test_on_disconnect_hook_fires_when_the_client_closes_cleanly():
     async def on_disconnect(session):
         disconnected.append(session)
 
-    handler = make_handler(session_manager, on_disconnect=on_disconnect)
+    handler = build_handler(session_manager, on_disconnect=on_disconnect)
 
     async with serve(handler, 'localhost', 0) as server:
         port = server.sockets[0].getsockname()[1]
@@ -116,7 +116,7 @@ async def test_on_disconnect_exception_does_not_prevent_session_removal():
     async def broken_on_disconnect(_session):
         raise RuntimeError('boom')
 
-    handler = make_handler(session_manager, on_disconnect=broken_on_disconnect)
+    handler = build_handler(session_manager, on_disconnect=broken_on_disconnect)
 
     async with serve(handler, 'localhost', 0) as server:
         port = server.sockets[0].getsockname()[1]
@@ -134,7 +134,7 @@ async def test_on_message_hook_response_is_sent_back_to_the_sender():
     async def echo(_session, raw: str) -> str:
         return f'echo:{raw}'
 
-    handler = make_handler(session_manager, on_message=echo)
+    handler = build_handler(session_manager, on_message=echo)
 
     async with serve(handler, 'localhost', 0) as server:
         port = server.sockets[0].getsockname()[1]
@@ -151,7 +151,7 @@ async def test_on_message_hook_returning_none_sends_nothing():
     async def swallow(_session, _raw: str):
         return None
 
-    handler = make_handler(session_manager, on_message=swallow)
+    handler = build_handler(session_manager, on_message=swallow)
 
     async with serve(handler, 'localhost', 0) as server:
         port = server.sockets[0].getsockname()[1]
