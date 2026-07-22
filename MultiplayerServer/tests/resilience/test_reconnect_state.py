@@ -1,5 +1,5 @@
 from core.clock import FakeClock
-from network.session import Role
+from core.protocol import Role
 from resilience.reconnect_state import ReconnectState
 
 

@@ -1,29 +1,9 @@
 from __future__ import annotations
 import uuid
 from dataclasses import dataclass
-from enum import Enum
 from typing import Optional
 
-
-class Role(Enum):
-    """
-    A connected client's role within whatever room it belongs to.
-
-    VIEWER exists from Phase 5 on (game/rooms.py) — no phase before that
-    may reference a spectator concept.
-
-    can_move is written as "is this one of the playing colors" rather than
-    "is this not VIEWER" — written that way back in Phase 1, before VIEWER
-    existed, specifically so game/commands.py's viewer gate would need no
-    changes once this enum grew a third member. It didn't.
-    """
-    WHITE = 'white'
-    BLACK = 'black'
-    VIEWER = 'viewer'
-
-    @property
-    def can_move(self) -> bool:
-        return self in (Role.WHITE, Role.BLACK)
+from core.protocol import Role
 
 
 @dataclass

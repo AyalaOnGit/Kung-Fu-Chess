@@ -22,20 +22,19 @@ import secrets
 import time
 from typing import Awaitable, Callable, Dict, List, Optional
 
-from websockets.exceptions import ConnectionClosed
-
 from kungfu_chess.engine.game_engine import GameEngine
 from kungfu_chess.model.piece import Color
 
 from config import TICK_INTERVAL_MS
 from core.bus import AsyncMessageBus, Unsubscribe
-from core.protocol import Envelope, encode
+from core.protocol import Envelope, Role, encode
 from game.commands import HandleResult, handle_jump, handle_move
 from game.engine_bridge import EngineEventRelay
 from game.engine_factory import build_game_stack
 from game.events import GameOver
 from game.wire import to_wire
-from network.session import ClientSession, Role
+from network.broadcast import Broadcaster, WebsocketBroadcaster
+from network.session import ClientSession
 from network.server import SessionManager
 from observability.logging_conf import make_room_event_logger
 
@@ -152,26 +151,26 @@ class Room:
             logger.exception('on_game_over callback raised for room %s', self.room_id)
 
 
-def _build_room_broadcaster(bus: AsyncMessageBus, session_manager: SessionManager, room_id: str) -> Unsubscribe:
+def _build_room_broadcaster(bus: AsyncMessageBus, session_manager: SessionManager,
+                             broadcaster: Broadcaster, room_id: str) -> Unsubscribe:
     """
     Fan every game event for room_id out to every session currently in
     that room — players AND viewers alike (a viewer can't move, but they
     still need to see the game). Unlike Phases 1-4's single shared match,
     role alone no longer identifies "is in the active match" once more
     than one room can be running at once — room_id is what scopes this.
+
+    Delivery itself is delegated to `broadcaster`: this module only asks
+    "who is in this room" (SessionManager) and "send them this" (Broadcaster)
+    — it never touches a session's transport object directly.
     """
     topic = topic_for(room_id)
 
     async def handler(event) -> None:
         envelope_type, data = to_wire(event)
         raw = encode(Envelope(type=envelope_type, data=data))
-        for session in session_manager.sessions:
-            if session.room_id != room_id:
-                continue
-            try:
-                await session.websocket.send(raw)
-            except ConnectionClosed:
-                pass  # the session's own connection handler will clean it up
+        room_sessions = [s for s in session_manager.sessions if s.room_id == room_id]
+        await broadcaster.broadcast(room_sessions, raw)
 
     return bus.subscribe(topic, handler)
 
@@ -186,11 +185,13 @@ class RoomManager:
     """
 
     def __init__(self, bus: AsyncMessageBus, session_manager: SessionManager,
-                 on_game_over: Optional[OnGameOver] = None, log_events: bool = True):
+                 on_game_over: Optional[OnGameOver] = None, log_events: bool = True,
+                 broadcaster: Optional[Broadcaster] = None):
         self._bus = bus
         self._session_manager = session_manager
         self._on_game_over = on_game_over
         self._log_events = log_events
+        self._broadcaster = broadcaster if broadcaster is not None else WebsocketBroadcaster()
         self._rooms: Dict[str, Room] = {}
         self._unsubscribers: Dict[str, List[Unsubscribe]] = {}
 
@@ -199,7 +200,7 @@ class RoomManager:
         room = Room(room_id, self._bus, engine=engine, on_game_over=self._on_game_over)
         self._rooms[room_id] = room
 
-        unsubscribers = [_build_room_broadcaster(self._bus, self._session_manager, room_id)]
+        unsubscribers = [_build_room_broadcaster(self._bus, self._session_manager, self._broadcaster, room_id)]
         if self._log_events:
             unsubscribers.append(self._bus.subscribe(room.topic, make_room_event_logger(room_id)))
         self._unsubscribers[room_id] = unsubscribers

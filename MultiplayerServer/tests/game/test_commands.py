@@ -4,11 +4,11 @@ import types
 import pytest
 
 from core.bus import AsyncMessageBus
-from core.protocol import ErrorCode
+from core.protocol import ErrorCode, Role
 from game.commands import HandleResult, handle_jump, handle_move
 from game.engine_factory import build_game_stack
 from game.events import JumpAccepted, MoveAccepted
-from network.session import ClientSession, Role
+from network.session import ClientSession
 
 from kungfu_chess.model.board import Board
 from kungfu_chess.model.piece import Piece, Color, Kind

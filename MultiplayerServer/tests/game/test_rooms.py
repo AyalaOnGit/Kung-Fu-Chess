@@ -8,7 +8,8 @@ from game.engine_factory import build_game_stack
 from game.events import GameOver, PieceArrived
 from game.rooms import Room, RoomManager, topic_for
 from network.server import SessionManager
-from network.session import ClientSession, Role
+from network.session import ClientSession
+from core.protocol import Role
 
 from kungfu_chess.model.board import Board
 from kungfu_chess.model.piece import Piece, Color, Kind

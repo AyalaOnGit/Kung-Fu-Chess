@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from typing import Dict, List, Optional, Tuple
 
 from core.clock import Clock
-from network.session import Role
+from core.protocol import Role
 
 DEFAULT_GRACE_SECONDS = 20.0
 

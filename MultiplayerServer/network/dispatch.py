@@ -28,13 +28,14 @@ from dataclasses import dataclass, field
 from typing import Awaitable, Callable, Dict, Optional, Tuple
 
 from auth import service as auth_service
-from core.protocol import ErrorCode, Envelope, MalformedEnvelopeError, decode, encode
+from core.protocol import ErrorCode, Envelope, MalformedEnvelopeError, Role, decode, encode
 from db.users_repository import UsersRepository
 from game.commands import HandleResult
+from game.room_membership import RoomMembership
 from game.rooms import RoomManager
 from game.wire import state_sync_payload
 from matchmaking.queue import MatchmakingQueue
-from network.session import ClientSession, Role
+from network.session import ClientSession
 from network.server import SessionManager
 from observability.logging_conf import log_command
 from resilience.reconnect_state import ReconnectState
@@ -49,12 +50,12 @@ class DispatchContext:
     users_repo: UsersRepository
     matchmaking_queue: MatchmakingQueue
     reconnect_state: ReconnectState
-    # (white_user_id, black_user_id) per room_id -- the same dict main.py's
-    # on_game_over reads from to know who to record a rated result for.
-    # Matchmade rooms populate it in on_paired; create_room/join_room have
-    # to populate it here instead, since dispatch.py is the only place that
-    # ever learns a manually-created room's seats.
-    room_players: Dict[str, Tuple[Optional[int], Optional[int]]] = field(default_factory=dict)
+    # Same RoomMembership main.py's on_game_over reads from to know who to
+    # record a rated result for. Matchmade rooms populate it in on_paired;
+    # create_room/join_room have to populate it here instead, since
+    # dispatch.py is the only place that ever learns a manually-created
+    # room's seats.
+    room_membership: RoomMembership = field(default_factory=RoomMembership)
 
 
 Handler = Callable[[ClientSession, DispatchContext, dict], Awaitable[Envelope]]
@@ -194,7 +195,7 @@ async def _handle_create_room(session: ClientSession, ctx: DispatchContext, _dat
     user = await ctx.users_repo.get_by_id(session.user_id)
     room = ctx.room_manager.create_room()
     session.room_id, session.role = room.room_id, Role.WHITE
-    ctx.room_players[room.room_id] = (session.user_id, None)
+    ctx.room_membership.add(room.room_id, session.user_id, None)
     room.start()
     return Envelope(type='room_created', data={
         'room_id': room.room_id, 'role': Role.WHITE.value, 'state': state_sync_payload(room.engine),
@@ -233,13 +234,13 @@ async def _handle_join_room(session: ClientSession, ctx: DispatchContext, data: 
     black_username, black_elo = await _identity_for_role(ctx, room_id, Role.BLACK)
 
     joining_user = await ctx.users_repo.get_by_id(session.user_id)
-    prev_white_id, prev_black_id = ctx.room_players.get(room_id, (None, None))
+    prev_white_id, prev_black_id = ctx.room_membership.get(room_id)
     if role is Role.WHITE:
         white_username, white_elo = joining_user.username, joining_user.elo
-        ctx.room_players[room_id] = (session.user_id, prev_black_id)
+        ctx.room_membership.add(room_id, session.user_id, prev_black_id)
     elif role is Role.BLACK:
         black_username, black_elo = joining_user.username, joining_user.elo
-        ctx.room_players[room_id] = (prev_white_id, session.user_id)
+        ctx.room_membership.add(room_id, prev_white_id, session.user_id)
 
     session.room_id, session.role = room_id, role
     return Envelope(type='room_joined', data={
@@ -276,7 +277,7 @@ _HANDLERS: Dict[str, Handler] = {
 def build_dispatcher(
     room_manager: RoomManager, session_manager: SessionManager, users_repo: UsersRepository,
     matchmaking_queue: MatchmakingQueue, reconnect_state: ReconnectState,
-    room_players: Optional[Dict[str, Tuple[Optional[int], Optional[int]]]] = None,
+    room_membership: Optional[RoomMembership] = None,
 ) -> Callable[[ClientSession, str], Awaitable[str]]:
     """
     Build the on_message callback network/server.py calls for every raw
@@ -284,12 +285,13 @@ def build_dispatcher(
     sender — malformed envelopes and unrecognized types get an error
     response of their own rather than being silently dropped.
 
-    room_players: pass main.py's own dict so create_room/join_room's writes
-    land in the exact same object its on_game_over reads from -- omitted
-    (tests that don't exercise a rated end-of-game) just gets a private one.
+    room_membership: pass main.py's own RoomMembership so create_room/
+    join_room's writes land in the exact same object its on_game_over reads
+    from -- omitted (tests that don't exercise a rated end-of-game) just
+    gets a private one.
     """
     ctx = DispatchContext(room_manager, session_manager, users_repo, matchmaking_queue, reconnect_state,
-                           room_players=room_players if room_players is not None else {})
+                           room_membership=room_membership if room_membership is not None else RoomMembership())
 
     async def on_message(session: ClientSession, raw: str) -> str:
         try:

@@ -10,7 +10,7 @@ import logging
 from typing import Awaitable, Callable, Optional
 
 from core.clock import Clock
-from network.session import Role
+from core.protocol import Role
 from resilience.reconnect_state import ReconnectState
 
 logger = logging.getLogger(__name__)

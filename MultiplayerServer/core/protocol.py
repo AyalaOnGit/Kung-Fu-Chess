@@ -37,6 +37,32 @@ class ErrorCode(Enum):
     ILLEGAL_MOVE        = 'illegal_piece_move'
 
 
+class Role(Enum):
+    """
+    A connected client's role within whatever room it belongs to.
+
+    Lives here rather than in network/session.py because it's a shared-kernel
+    concept: network/ (ClientSession), resilience/ (reconnect tracking), and
+    game/ all need it, and resilience/ is documented as transport-agnostic --
+    it should not have to reach into network/ for an enum.
+
+    VIEWER exists from Phase 5 on (game/rooms.py) — no phase before that
+    may reference a spectator concept.
+
+    can_move is written as "is this one of the playing colors" rather than
+    "is this not VIEWER" — written that way back in Phase 1, before VIEWER
+    existed, specifically so game/commands.py's viewer gate would need no
+    changes once this enum grew a third member. It didn't.
+    """
+    WHITE = 'white'
+    BLACK = 'black'
+    VIEWER = 'viewer'
+
+    @property
+    def can_move(self) -> bool:
+        return self in (Role.WHITE, Role.BLACK)
+
+
 @dataclass(frozen=True)
 class Envelope:
     """A decoded wire message: a type tag plus a flat data payload."""

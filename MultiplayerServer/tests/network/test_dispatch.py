@@ -4,16 +4,17 @@ import pytest
 
 from core.bus import AsyncMessageBus
 from core.clock import FakeClock
-from core.protocol import decode
+from core.protocol import Role, decode
 from db.connection import Database
 from db.schema import init_schema
 from db.users_repository import UsersRepository
 from game.engine_factory import build_game_stack
+from game.room_membership import RoomMembership
 from game.rooms import RoomManager
 from matchmaking.queue import MatchmakingQueue
 from network.dispatch import build_dispatcher
 from network.server import SessionManager
-from network.session import ClientSession, Role
+from network.session import ClientSession
 from resilience.reconnect_state import ReconnectState
 
 from kungfu_chess.model.board import Board
@@ -51,13 +52,14 @@ class _Harness:
         self.room_manager = RoomManager(AsyncMessageBus(), self.session_manager, log_events=False)
         self.queue = queue if queue is not None else _queue()
         self.reconnect_state = reconnect_state if reconnect_state is not None else _reconnect_state()
-        # Same dict main.py's on_game_over would read from -- exposed here
-        # so tests can check create_room/join_room actually populate it
-        # (a room whose seats were never recorded silently skips rating).
-        self.room_players = {}
+        # Same RoomMembership main.py's on_game_over would read from --
+        # exposed here so tests can check create_room/join_room actually
+        # populate it (a room whose seats were never recorded silently
+        # skips rating).
+        self.room_membership = RoomMembership()
         self.dispatch = build_dispatcher(
             self.room_manager, self.session_manager, users_repo, self.queue, self.reconnect_state,
-            room_players=self.room_players,
+            room_membership=self.room_membership,
         )
 
     def new_session(self) -> ClientSession:
@@ -473,8 +475,8 @@ async def test_create_room_makes_the_creator_white_and_starts_the_room():
 
 
 @pytest.mark.asyncio
-async def test_create_room_records_the_creator_as_white_in_room_players():
-    """room_players is what main.py's on_game_over reads to know who to
+async def test_create_room_records_the_creator_as_white_in_room_membership():
+    """room_membership is what main.py's on_game_over reads to know who to
     record a rated result for -- a room whose seats never landed here
     would silently skip ELO updates for the whole game (the bug this
     covers: create_room/join_room used to never populate it at all)."""
@@ -485,13 +487,13 @@ async def test_create_room_records_the_creator_as_white_in_room_players():
     raw = await h.dispatch(session, json.dumps({'type': 'create_room', 'data': {}}))
     room_id = decode(raw).data['room_id']
 
-    assert h.room_players[room_id] == (session.user_id, None)
+    assert h.room_membership.get(room_id) == (session.user_id, None)
 
     await h.room_manager.end_room(room_id)
 
 
 @pytest.mark.asyncio
-async def test_join_room_records_the_second_player_as_black_in_room_players():
+async def test_join_room_records_the_second_player_as_black_in_room_membership():
     h = await _harness()
     creator = h.new_session()
     await _register(h, creator, 'alice')
@@ -502,13 +504,13 @@ async def test_join_room_records_the_second_player_as_black_in_room_players():
     await _register(h, joiner, 'bob')
     await h.dispatch(joiner, json.dumps({'type': 'join_room', 'data': {'room_id': room_id}}))
 
-    assert h.room_players[room_id] == (creator.user_id, joiner.user_id)
+    assert h.room_membership.get(room_id) == (creator.user_id, joiner.user_id)
 
     await h.room_manager.end_room(room_id)
 
 
 @pytest.mark.asyncio
-async def test_join_room_as_a_viewer_does_not_touch_room_players():
+async def test_join_room_as_a_viewer_does_not_touch_room_membership():
     h = await _harness()
     creator = h.new_session()
     await _register(h, creator, 'alice')
@@ -523,7 +525,7 @@ async def test_join_room_as_a_viewer_does_not_touch_room_players():
     await _register(h, viewer, 'carol')
     await h.dispatch(viewer, json.dumps({'type': 'join_room', 'data': {'room_id': room_id}}))
 
-    assert h.room_players[room_id] == (creator.user_id, black.user_id)
+    assert h.room_membership.get(room_id) == (creator.user_id, black.user_id)
 
     await h.room_manager.end_room(room_id)
 
