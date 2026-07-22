@@ -2,15 +2,6 @@
 Basic unit tests for UI modules.
 """
 import pytest
-import sys
-import pathlib
-
-# Add UI directory to path
-ui_dir = pathlib.Path(__file__).parent.parent
-if str(ui_dir) not in sys.path:
-    sys.path.insert(0, str(ui_dir))
-
-import path_bootstrap  # noqa: F401
 
 from animation.animation_clock import AnimationClock
 from animation.motion_predictor import interpolate_pixel, PixelMotion, is_motion_complete

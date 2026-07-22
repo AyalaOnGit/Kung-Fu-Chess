@@ -3,15 +3,6 @@ Unit tests for UI/ui_components/game_over_banner.py's GameOverBanner --
 composes the end-of-game dialog's title (winner) and, once a RatingUpdate
 arrives, each player's new rating and signed ELO change.
 """
-import sys
-import pathlib
-
-ui_dir = pathlib.Path(__file__).parent.parent.parent
-if str(ui_dir) not in sys.path:
-    sys.path.insert(0, str(ui_dir))
-
-import path_bootstrap  # noqa: F401
-
 from kungfu_chess.model.piece import Color
 from state.game_events import GameOver, RatingUpdate
 from ui_components.game_over_banner import GameOverBanner

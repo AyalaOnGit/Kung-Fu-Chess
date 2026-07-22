@@ -3,16 +3,7 @@ Unit tests for UI/graphics/hud_renderer.py's networked-play header (role,
 room id, network status) -- added so two networked game windows on the same
 desktop can be told apart (same title + same board otherwise).
 """
-import sys
-import pathlib
-
 import numpy as np
-
-ui_dir = pathlib.Path(__file__).parent.parent.parent
-if str(ui_dir) not in sys.path:
-    sys.path.insert(0, str(ui_dir))
-
-import path_bootstrap  # noqa: F401
 
 from graphics.hud_renderer import HudRenderer
 from state.game_events import GameOverInfo

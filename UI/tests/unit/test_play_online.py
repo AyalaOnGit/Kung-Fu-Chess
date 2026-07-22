@@ -3,15 +3,7 @@ Unit tests for UI/play_online.py's orchestration (login -> lobby -> game
 screen), with home_shell/lobby_window/main.py all faked out -- each of
 those is already covered by its own test module.
 """
-import sys
-import pathlib
 from types import SimpleNamespace
-
-ui_dir = pathlib.Path(__file__).parent.parent.parent
-if str(ui_dir) not in sys.path:
-    sys.path.insert(0, str(ui_dir))
-
-import path_bootstrap  # noqa: F401
 
 import play_online
 from lobby_window import LobbyResult

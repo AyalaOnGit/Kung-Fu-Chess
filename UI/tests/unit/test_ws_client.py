@@ -5,18 +5,10 @@ is actually verified end-to-end.
 """
 import asyncio
 import json
-import sys
-import pathlib
 import threading
 import time
 
 import pytest
-
-ui_dir = pathlib.Path(__file__).parent.parent.parent
-if str(ui_dir) not in sys.path:
-    sys.path.insert(0, str(ui_dir))
-
-import path_bootstrap  # noqa: F401
 
 from websockets.asyncio.server import serve
 

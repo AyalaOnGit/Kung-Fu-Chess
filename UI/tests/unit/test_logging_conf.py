@@ -2,14 +2,6 @@
 Unit tests for UI/observability/logging_conf.py.
 """
 import logging
-import sys
-import pathlib
-
-ui_dir = pathlib.Path(__file__).parent.parent.parent
-if str(ui_dir) not in sys.path:
-    sys.path.insert(0, str(ui_dir))
-
-import path_bootstrap  # noqa: F401
 
 from observability.logging_conf import client_logger, configure_client_logging, log_command, log_event, redact
 

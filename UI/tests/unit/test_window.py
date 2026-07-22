@@ -15,15 +15,7 @@ in the first place; zoom still works because AUTOSIZE follows imshow()'s
 image size automatically, and the app's own +/- keys resize the image
 before every imshow() call.
 """
-import sys
-import pathlib
 from unittest.mock import patch
-
-ui_dir = pathlib.Path(__file__).parent.parent.parent
-if str(ui_dir) not in sys.path:
-    sys.path.insert(0, str(ui_dir))
-
-import path_bootstrap  # noqa: F401
 
 import cv2
 

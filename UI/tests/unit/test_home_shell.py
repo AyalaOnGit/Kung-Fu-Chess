@@ -3,15 +3,6 @@ Unit tests for UI/home_shell.py's login() flow, using a scripted fake
 WsClient (no real socket -- ws_client.py's networking is covered separately
 by test_ws_client.py).
 """
-import sys
-import pathlib
-
-ui_dir = pathlib.Path(__file__).parent.parent.parent
-if str(ui_dir) not in sys.path:
-    sys.path.insert(0, str(ui_dir))
-
-import path_bootstrap  # noqa: F401
-
 import pytest
 
 import home_shell

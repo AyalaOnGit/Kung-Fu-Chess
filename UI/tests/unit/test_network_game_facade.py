@@ -5,15 +5,6 @@ Uses a fake WsClient (no real socket) since ws_client.py's own networking is
 already covered end-to-end by test_ws_client.py -- these tests are about
 NetworkGameFacade's wire-event translation and role gating.
 """
-import sys
-import pathlib
-
-ui_dir = pathlib.Path(__file__).parent.parent.parent
-if str(ui_dir) not in sys.path:
-    sys.path.insert(0, str(ui_dir))
-
-import path_bootstrap  # noqa: F401
-
 from kungfu_chess.config import COOLDOWN_MS
 from kungfu_chess.interaction.board_mapper import BoardMapper
 from kungfu_chess.model.piece import Color, Kind, PieceState

@@ -4,15 +4,6 @@ behind the Tkinter lobby (Play/Room). No Tkinter window is created here;
 _LobbyApp itself is exercised manually since it's a thin GUI shell around
 this controller.
 """
-import sys
-import pathlib
-
-ui_dir = pathlib.Path(__file__).parent.parent.parent
-if str(ui_dir) not in sys.path:
-    sys.path.insert(0, str(ui_dir))
-
-import path_bootstrap  # noqa: F401
-
 from lobby_window import LobbyController, LobbyResult
 from network.protocol import Envelope
 

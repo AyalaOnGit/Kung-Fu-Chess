@@ -1,15 +1,7 @@
 """
 Unit tests for UI/audio/tone_generator.py and UI/audio/sound_manager.py.
 """
-import sys
-import pathlib
 import wave
-
-ui_dir = pathlib.Path(__file__).parent.parent.parent
-if str(ui_dir) not in sys.path:
-    sys.path.insert(0, str(ui_dir))
-
-import path_bootstrap  # noqa: F401
 
 from audio.tone_generator import ensure_tone, generate_tone
 from audio.sound_manager import SoundManager, _TONE_SPECS
