@@ -28,10 +28,10 @@ import pytest_asyncio
 from websockets.asyncio.client import connect
 
 # Must import this package's own main.py *before* anything that pulls in
-# game.engine_path (below): that module inserts Server/ onto sys.path so
-# `import kungfu_chess` resolves, which as a side effect makes a bare
-# `import main` resolve to Server/main.py instead of this one -- same
-# top-level module name, and Server/ would now sort first.
+# game.engine_path (below): that module inserts ChessEngine/ onto sys.path so
+# `import kungfu_chess` resolves, which as a side effect would make a bare
+# `import main` ambiguous with any top-level main.py ChessEngine/ ever grows,
+# since ChessEngine/ would now sort first.
 import main as server_main
 
 import game.engine_path  # noqa: F401  (must run before any kungfu_chess import)

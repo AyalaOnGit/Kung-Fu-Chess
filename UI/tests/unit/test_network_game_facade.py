@@ -15,7 +15,7 @@ if str(ui_dir) not in sys.path:
 import server_bridge  # noqa: F401
 
 from kungfu_chess.config import COOLDOWN_MS
-from kungfu_chess.input.board_mapper import BoardMapper
+from kungfu_chess.interaction.board_mapper import BoardMapper
 from kungfu_chess.model.piece import Color, Kind, PieceState
 from kungfu_chess.model.position import Position
 

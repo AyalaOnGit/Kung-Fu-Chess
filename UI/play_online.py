@@ -27,10 +27,10 @@ from observability.logging_conf import log_event
 def _load_game_main():
     """
     Load UI/main.py by explicit file path rather than `import main`: by the
-    time this runs, server_bridge has put Server/ ahead of UI/ on sys.path
-    (so kungfu_chess resolves), which means a bare `import main` would
-    silently resolve to Server/main.py instead of this file's sibling --
-    they share the same top-level module name.
+    time this runs, server_bridge has put ChessEngine/ ahead of UI/ on
+    sys.path (so kungfu_chess resolves), which means a bare `import main`
+    would be ambiguous with any top-level main.py ChessEngine/ ever grows --
+    they'd share the same top-level module name.
     """
     spec = importlib.util.spec_from_file_location('ui_game_main', ui_dir / 'main.py')
     module = importlib.util.module_from_spec(spec)

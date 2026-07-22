@@ -4,9 +4,9 @@ from kungfu_chess.model.game_state import GameState
 from kungfu_chess.rules.rule_engine import RuleEngine
 from kungfu_chess.realtime.real_time_arbiter import RealTimeArbiter
 from kungfu_chess.engine.game_engine import GameEngine
-from kungfu_chess.input.board_mapper import BoardMapper
-from kungfu_chess.input.controller import Controller
-from kungfu_chess.texttests.script_runner import ScriptRunner
+from kungfu_chess.interaction.board_mapper import BoardMapper
+from kungfu_chess.interaction.controller import Controller
+from kungfu_chess.scripting.script_runner import ScriptRunner
 from kungfu_chess.config import COOLDOWN_MS
 
 

@@ -1,7 +1,7 @@
 from __future__ import annotations
 from typing import Optional
 from kungfu_chess.model.position import Position
-from kungfu_chess.input.board_mapper import BoardMapper
+from kungfu_chess.interaction.board_mapper import BoardMapper
 from kungfu_chess.engine.game_engine import GameEngine
 from kungfu_chess.engine.commands import MoveCommand, JumpCommand
 

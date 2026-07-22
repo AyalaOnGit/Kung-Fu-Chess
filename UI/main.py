@@ -49,7 +49,7 @@ from kungfu_chess.model.board import Board
 
 from kungfu_chess.factory import build_engine
 from kungfu_chess.io.board_factory import standard_board
-from kungfu_chess.input.board_mapper import BoardMapper
+from kungfu_chess.interaction.board_mapper import BoardMapper
 
 
 def _build_mapper(board: Board) -> BoardMapper:

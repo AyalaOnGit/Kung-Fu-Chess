@@ -10,7 +10,7 @@ Split in two pieces on purpose:
   - _LobbyApp / _RoomDialog: a thin Tkinter shell that calls the controller
     and updates widgets from its output.
 This mirrors the rest of the codebase's separation of logic from rendering
-(kungfu_chess.input.Controller vs graphics.renderer, GameFacade vs
+(kungfu_chess.interaction.Controller vs graphics.renderer, GameFacade vs
 ui_components/*).
 """
 from __future__ import annotations

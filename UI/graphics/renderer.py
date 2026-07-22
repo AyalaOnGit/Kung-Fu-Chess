@@ -13,7 +13,7 @@ from kungfu_chess.config import CELL_SIZE_PX
 from kungfu_chess.model.position import Position
 from kungfu_chess.model.board import Board
 from kungfu_chess.model.piece import Piece, PieceState
-from kungfu_chess.input.board_mapper import BoardMapper
+from kungfu_chess.interaction.board_mapper import BoardMapper
 from ui_config import (
     PIECE_SCALE, SELECTION_COLOR, SELECTION_BORDER_COLOR, SELECTION_BORDER_THICKNESS,
     SELECTION_FILL_ALPHA, JUMP_RING_COLOR, JUMP_RING_THICKNESS, JUMP_RING_MARGIN_PX,

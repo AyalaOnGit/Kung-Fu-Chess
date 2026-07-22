@@ -20,7 +20,7 @@ from dataclasses import dataclass
 from typing import Dict, Optional
 
 from kungfu_chess.config import COOLDOWN_MS, JUMP_DURATION_MS
-from kungfu_chess.input.board_mapper import BoardMapper
+from kungfu_chess.interaction.board_mapper import BoardMapper
 from kungfu_chess.model.board import Board
 from kungfu_chess.model.piece import Color, Kind, Piece, PieceState
 from kungfu_chess.model.position import Position
@@ -118,7 +118,7 @@ class NetworkGameFacade:
     # --- user input routing ---
 
     def request_click(self, x: int, y: int) -> bool:
-        """Same selection semantics as kungfu_chess.input.controller.Controller,
+        """Same selection semantics as kungfu_chess.interaction.controller.Controller,
         against the mirror board, gated to pieces of my_color. Returns True
         if this was a destination click (2nd click)."""
         if self._is_viewer or not self._mapper.in_bounds_px(x, y):

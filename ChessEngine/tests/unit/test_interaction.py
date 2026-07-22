@@ -1,8 +1,8 @@
 import unittest
 from kungfu_chess.model.position import Position
 from kungfu_chess.model.piece import Kind
-from kungfu_chess.input.board_mapper import BoardMapper
-from kungfu_chess.input.controller import Controller
+from kungfu_chess.interaction.board_mapper import BoardMapper
+from kungfu_chess.interaction.controller import Controller
 from kungfu_chess.factory import build_engine
 from tests.conftest import W, board_with
 

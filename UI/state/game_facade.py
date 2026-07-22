@@ -15,10 +15,10 @@ from enum import Enum
 
 from kungfu_chess.engine.game_engine import GameEngine
 from kungfu_chess.engine.commands import MoveCommand, JumpCommand
-from kungfu_chess.input.controller import Controller
+from kungfu_chess.interaction.controller import Controller
 from kungfu_chess.model.position import Position
 from kungfu_chess.model.piece import Piece, PieceState
-from kungfu_chess.input.board_mapper import BoardMapper
+from kungfu_chess.interaction.board_mapper import BoardMapper
 from kungfu_chess.config import JUMP_DURATION_MS
 
 from state.observer import Subject
