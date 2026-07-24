@@ -175,3 +175,44 @@ def test_missing_sprites_falls_back_gracefully_without_raising(tmp_path):
     frame = renderer.render(dt_ms=16.0)
 
     assert frame is not None
+
+
+def test_cooling_piece_with_zero_ratio_skips_drawing_the_cooldown_bar(tmp_path):
+    """get_cooldown_ratio() returning 0.0 (cooldown just started or already
+    resolved) must skip drawing the bar entirely rather than drawing a
+    zero-width one."""
+    _all_states(tmp_path, 'RW')
+    board = Board(width=8, height=8)
+    piece = Piece(id=1, color=Color.WHITE, kind=Kind.ROOK, cell=Position(0, 0),
+                  state=PieceState.COOLING)
+    board.add_piece(piece)
+    renderer = _renderer(board, tmp_path, facade=_FakeFacade(cooldown_ratio=0.0))
+
+    frame = renderer.render(dt_ms=16.0)
+
+    assert frame is not None
+
+
+def test_a_broken_sprite_frame_is_caught_and_that_piece_is_simply_skipped(tmp_path):
+    """_draw_piece wraps its own body in try/except: any failure drawing
+    one piece (e.g. a corrupt/unreadable sprite frame slipping past
+    SpriteLoader) must not crash the whole frame -- just that piece is
+    skipped."""
+    from graphics.sprite_loader import SpriteConfig, SpriteFrame
+
+    class _BrokenSpriteLoader:
+        def load_frames(self, piece_code, state):
+            return [SpriteFrame(image=None, duration_ms=100.0)]  # .shape access blows up
+
+        def get_config(self, piece_code, state):
+            return SpriteConfig(frames_per_sec=10.0, is_loop=True, next_state_when_finished='idle')
+
+    board = Board(width=8, height=8)
+    board.add_piece(Piece(id=1, color=Color.WHITE, kind=Kind.ROOK, cell=Position(0, 0)))
+    mapper = BoardMapper(board.width, board.height)
+    renderer = BoardRenderer(board, _BrokenSpriteLoader(), str(tmp_path / 'no-such-board.png'),
+                              _FakeFacade(), mapper)
+
+    frame = renderer.render(dt_ms=16.0)
+
+    assert frame is not None

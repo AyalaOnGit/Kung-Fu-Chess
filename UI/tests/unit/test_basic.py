@@ -52,6 +52,31 @@ def test_motion_predictor():
     assert px == (100, 100), f"Expected (100,100), got {px}"
 
 
+def test_animation_clock_reset_rebases_elapsed_time_to_now():
+    sources = [0.0]
+
+    def mock_time():
+        return sources[0]
+
+    clock = AnimationClock(time_source=mock_time)
+    sources[0] = 5.0  # a long time passes before the next tick
+
+    clock.reset()
+    sources[0] = 5.016  # 16ms after the reset point, not after construction
+
+    dt_ms = clock.tick()
+    assert abs(dt_ms - 16) < 1, f"Expected ~16ms since reset, got {dt_ms}"
+
+
+def test_interpolate_pixel_with_zero_duration_snaps_straight_to_destination():
+    """duration_ms<=0 (e.g. a same-cell jump target) can't be lerped through
+    normally -- must return the destination outright rather than dividing
+    by zero."""
+    motion = PixelMotion(src_px=(0, 0), dst_px=(42, 99), duration_ms=0.0)
+
+    assert interpolate_pixel(motion, 0.0) == (42, 99)
+
+
 def test_motion_complete():
     """Test motion completion check."""
     motion = PixelMotion(

@@ -102,6 +102,23 @@ class TestDiffSnapshots(unittest.TestCase):
         self.assertEqual(winner, Color.BLACK)
         self.assertEqual(loser, Color.WHITE)
 
+    def test_black_king_missing_yields_white_wins(self):
+        white_king = W(Kind.KING, 0, 0)
+        black_king = B(Kind.KING, 7, 7)
+        b = board_with(white_king, black_king)
+        before = FrozenSnapshot.from_board(b, game_over=False)
+        b.remove_piece(Position(7, 7))
+        after = FrozenSnapshot.from_board(b, game_over=True)
+
+        events = diff_snapshots(before, after, {})
+
+        game_over_events = [e for e in events if e[0] == 'game_over']
+        self.assertEqual(len(game_over_events), 1)
+        _, (winner, loser) = game_over_events[0]
+        from kungfu_chess.model.piece import Color
+        self.assertEqual(winner, Color.WHITE)
+        self.assertEqual(loser, Color.BLACK)
+
     def test_game_over_already_true_before_yields_no_new_game_over_event(self):
         """Only the before->after transition should fire -- a diff between
         two already-game-over snapshots must not re-fire it."""

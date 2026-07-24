@@ -225,6 +225,62 @@ async def test_rejected_move_publishes_nothing():
 # --- handle_jump mirrors the same pipeline ---
 
 @pytest.mark.asyncio
+async def test_jump_viewer_role_is_rejected_before_touching_the_engine():
+    fake_session = types.SimpleNamespace(role=types.SimpleNamespace(can_move=False, value='viewer'))
+    bus = AsyncMessageBus()
+
+    result = handle_jump(fake_session, None, bus, 'room:test', {'cell': [0, 0]})
+
+    assert result == HandleResult(accepted=False, error=ErrorCode.VIEWER_READ_ONLY)
+
+
+@pytest.mark.asyncio
+async def test_jump_unmatched_session_is_rejected_before_touching_the_engine():
+    session = ClientSession.new(websocket=None, role=None)
+    bus = AsyncMessageBus()
+
+    result = handle_jump(session, None, bus, 'room:test', {'cell': [0, 0]})
+
+    assert result == HandleResult(accepted=False, error=ErrorCode.NOT_IN_A_MATCH)
+
+
+@pytest.mark.parametrize('data', [
+    {},
+    {'cell': None},
+    {'cell': [0]},
+    {'cell': [0, 0, 0]},
+    {'cell': ['a', 0]},
+    {'cell': [True, 0]},
+])
+@pytest.mark.asyncio
+async def test_malformed_jump_payload_is_rejected(data):
+    engine = build_game_stack(_board())
+    bus = AsyncMessageBus()
+    session = _session(Role.WHITE)
+
+    result = handle_jump(session, engine, bus, 'room:test', data)
+
+    assert result == HandleResult(accepted=False, error=ErrorCode.MALFORMED_COMMAND)
+
+
+@pytest.mark.asyncio
+async def test_jump_rejected_by_the_engine_is_translated_to_matching_error_code():
+    """A second immediate jump for the same piece is rejected by the
+    engine's own arbiter (still mid-jump / on cooldown) -- exercises
+    handle_jump's engine-rejection branch the same way
+    test_illegal_destination_is_translated_to_illegal_move does for moves."""
+    engine = build_game_stack(_board())
+    bus = AsyncMessageBus()
+    session = _session(Role.WHITE)
+
+    first = handle_jump(session, engine, bus, 'room:test', {'cell': [0, 0]})
+    assert first.accepted
+
+    second = handle_jump(session, engine, bus, 'room:test', {'cell': [0, 0]})
+    assert second == HandleResult(accepted=False, error=ErrorCode.MOTION_IN_PROGRESS)
+
+
+@pytest.mark.asyncio
 async def test_jump_rejects_someone_elses_piece():
     engine = build_game_stack(_board())
     bus = AsyncMessageBus()

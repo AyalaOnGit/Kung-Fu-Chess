@@ -1,5 +1,4 @@
 import asyncio
-from unittest.mock import patch
 
 import pytest
 
@@ -162,6 +161,23 @@ async def test_resign_publishes_a_game_over_event_on_the_rooms_own_topic():
 
 
 @pytest.mark.asyncio
+async def test_resign_swallows_an_exception_raised_by_the_on_game_over_callback():
+    """main.py's real on_game_over does DB round-trips and websocket sends
+    that can fail in ways unrelated to the room itself -- a raising
+    callback must not blow up resign() (or, by the same code path, the
+    tick loop's king-capture handling)."""
+    async def broken_on_game_over(room_id, winner_role, loser_role, reason):
+        raise RuntimeError('boom')
+
+    room = Room('r1', AsyncMessageBus(), engine=build_game_stack(_minimal_board()),
+                on_game_over=broken_on_game_over)
+
+    await room.resign(Role.WHITE, 'disconnect_timeout')  # must not raise
+
+    assert room.engine.game_over
+
+
+@pytest.mark.asyncio
 async def test_resign_is_idempotent():
     calls = []
 
@@ -209,11 +225,14 @@ async def test_create_room_twice_yields_distinct_room_ids():
 @pytest.mark.asyncio
 async def test_create_room_retries_on_id_collision():
     session_manager = SessionManager()
-    manager = RoomManager(AsyncMessageBus(), session_manager, log_events=False)
+    # id_factory: dependency injection standing in for the real
+    # secrets.token_urlsafe(4) -- first call collides with a room already
+    # occupying 'dup', so create_room must retry and land on the next id.
+    manager = RoomManager(AsyncMessageBus(), session_manager, log_events=False,
+                          id_factory=iter(['dup', 'unique']).__next__)
     manager._rooms['dup'] = Room('dup', AsyncMessageBus())  # pre-occupy 'dup'
 
-    with patch('game.rooms.secrets.token_urlsafe', side_effect=['dup', 'unique']):
-        room = manager.create_room()
+    room = manager.create_room()
 
     try:
         assert room.room_id == 'unique'
@@ -223,12 +242,12 @@ async def test_create_room_retries_on_id_collision():
 
 def test_create_room_gives_up_after_repeated_collisions():
     session_manager = SessionManager()
-    manager = RoomManager(AsyncMessageBus(), session_manager, log_events=False)
+    manager = RoomManager(AsyncMessageBus(), session_manager, log_events=False,
+                          id_factory=lambda: 'dup')
     manager._rooms['dup'] = Room('dup', AsyncMessageBus())
 
-    with patch('game.rooms.secrets.token_urlsafe', return_value='dup'):
-        with pytest.raises(RuntimeError):
-            manager.create_room()
+    with pytest.raises(RuntimeError):
+        manager.create_room()
 
 
 def test_get_returns_none_for_unknown_room_id():

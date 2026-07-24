@@ -5,6 +5,7 @@ import pytest
 import pytest_asyncio
 from websockets.asyncio.client import connect
 from websockets.asyncio.server import serve
+from websockets.exceptions import ConnectionClosed
 
 from network.server import SessionManager, build_handler
 
@@ -145,6 +146,20 @@ async def test_on_message_hook_response_is_sent_back_to_the_sender():
 
 
 @pytest.mark.asyncio
+async def test_messages_are_ignored_when_no_on_message_hook_is_set():
+    session_manager = SessionManager()
+    handler = build_handler(session_manager)  # on_message omitted entirely
+
+    async with serve(handler, 'localhost', 0) as server:
+        port = server.sockets[0].getsockname()[1]
+        async with connect(f'ws://localhost:{port}') as client:
+            await client.recv()  # 'connected'
+            await client.send('hello')
+            with pytest.raises(asyncio.TimeoutError):
+                await asyncio.wait_for(client.recv(), timeout=0.1)
+
+
+@pytest.mark.asyncio
 async def test_on_message_hook_returning_none_sends_nothing():
     session_manager = SessionManager()
 
@@ -160,3 +175,38 @@ async def test_on_message_hook_returning_none_sends_nothing():
             await client.send('hello')
             with pytest.raises(asyncio.TimeoutError):
                 await asyncio.wait_for(client.recv(), timeout=0.1)
+
+
+class _AbruptWebSocket:
+    """Duck-typed stand-in for a real ServerConnection whose send() itself
+    raises ConnectionClosed (an abnormal close mid-send), rather than the
+    `async for` loop just ending cleanly -- the one path in
+    handle_connection its `except ConnectionClosed: pass` actually guards.
+    Calling the handler coroutine directly with this fake, instead of
+    driving it over a real socket, sidesteps trying to force a real
+    abnormal close from a well-behaved client library."""
+
+    async def send(self, raw: str) -> None:
+        raise ConnectionClosed(rcvd=None, sent=None)
+
+    def __aiter__(self):
+        return self
+
+    async def __anext__(self):
+        raise StopAsyncIteration
+
+
+@pytest.mark.asyncio
+async def test_abrupt_send_failure_is_swallowed_and_teardown_still_runs():
+    session_manager = SessionManager()
+    disconnected = []
+
+    async def on_disconnect(session):
+        disconnected.append(session)
+
+    handler = build_handler(session_manager, on_disconnect=on_disconnect)
+
+    await handler(_AbruptWebSocket())
+
+    assert len(disconnected) == 1
+    assert session_manager.sessions == []

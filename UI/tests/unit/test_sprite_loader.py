@@ -101,3 +101,46 @@ def test_get_config_populates_cache_via_load_frames(tmp_path):
     loader.get_config('QB', 'move')
 
     assert ('QB', 'move') in loader._cache  # load_frames ran as a side effect
+
+
+def test_load_frames_with_a_nonexistent_pieces_dir_raises_file_not_found():
+    """The nested-subdirectory fallback's own iterdir() can itself fail
+    (e.g. pieces_dir doesn't exist at all) -- must be swallowed, falling
+    through to the normal FileNotFoundError rather than an unrelated
+    OSError escaping."""
+    loader = SpriteLoader('this/path/does/not/exist/anywhere')
+    with pytest.raises(FileNotFoundError):
+        loader.load_frames('RW', 'idle')
+
+
+def test_load_frames_raises_when_a_sprite_file_cannot_be_read(tmp_path):
+    """A file matching the numeric *.png glob that cv2 still can't decode
+    (e.g. corrupt/truncated, or here, not actually an image at all) surfaces
+    as a FileNotFoundError naming the specific sprite file."""
+    state_dir = tmp_path / 'RW' / 'states' / 'idle'
+    sprites_dir = state_dir / 'sprites'
+    sprites_dir.mkdir(parents=True)
+    (state_dir / 'config.json').write_text(json.dumps({
+        'graphics': {'frames_per_sec': 10.0, 'is_loop': True},
+        'physics': {'next_state_when_finished': 'idle'},
+    }))
+    (sprites_dir / '1.png').write_bytes(b'not a real png')  # cv2.imread returns None for this
+
+    loader = SpriteLoader(tmp_path)
+    with pytest.raises(FileNotFoundError, match='Cannot load sprite'):
+        loader.load_frames('RW', 'idle')
+
+
+def test_load_frames_with_no_png_files_raises_file_not_found(tmp_path):
+    state_dir = tmp_path / 'RW' / 'states' / 'idle'
+    sprites_dir = state_dir / 'sprites'
+    sprites_dir.mkdir(parents=True)
+    (state_dir / 'config.json').write_text(json.dumps({
+        'graphics': {'frames_per_sec': 10.0, 'is_loop': True},
+        'physics': {'next_state_when_finished': 'idle'},
+    }))
+    # sprites_dir exists but is empty -- no *.png files at all.
+
+    loader = SpriteLoader(tmp_path)
+    with pytest.raises(FileNotFoundError, match='No sprite frames'):
+        loader.load_frames('RW', 'idle')

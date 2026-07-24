@@ -108,9 +108,10 @@ class LobbyController:
 class _RoomDialog:
     """Modal Create/Join/Cancel dialog with a room-id textbox, per spec."""
 
-    def __init__(self, parent: tk.Misc, on_create, on_join):
+    def __init__(self, parent: tk.Misc, on_create, on_join, messagebox_module=messagebox):
         self._on_create = on_create
         self._on_join = on_join
+        self._messagebox = messagebox_module
 
         self._top = tk.Toplevel(parent)
         self._top.title('Room')
@@ -135,16 +136,18 @@ class _RoomDialog:
     def _join(self) -> None:
         room_id = self._room_id_var.get().strip()
         if not room_id:
-            messagebox.showerror('Kung-Fu Chess', 'Enter a room ID to join.')
+            self._messagebox.showerror('Kung-Fu Chess', 'Enter a room ID to join.')
             return
         self._top.destroy()
         self._on_join(room_id)
 
 
 class _LobbyApp:
-    def __init__(self, ws: WsClient, username: str):
+    def __init__(self, ws: WsClient, username: str, messagebox_module=messagebox):
         self._ws = ws
         self._controller = LobbyController(ws)
+        self._messagebox = messagebox_module
+        self._room_dialog: Optional[_RoomDialog] = None
         self.result: Optional[LobbyResult] = None
 
         self._queued = False
@@ -209,7 +212,8 @@ class _LobbyApp:
     # --- Room ---
 
     def _on_room(self) -> None:
-        _RoomDialog(self._root, on_create=self._controller.create_room, on_join=self._controller.join_room)
+        self._room_dialog = _RoomDialog(self._root, on_create=self._controller.create_room,
+                                         on_join=self._controller.join_room, messagebox_module=self._messagebox)
 
     # --- polling for server replies ---
 
@@ -227,9 +231,9 @@ class _LobbyApp:
         if outcome.queue_reset:
             self._apply_queue_reset(outcome.queue_reset_status or '')
         if outcome.info_popup is not None:
-            messagebox.showinfo('Kung-Fu Chess', outcome.info_popup)
+            self._messagebox.showinfo('Kung-Fu Chess', outcome.info_popup)
         if outcome.error_popup is not None:
-            messagebox.showerror('Kung-Fu Chess', outcome.error_popup)
+            self._messagebox.showerror('Kung-Fu Chess', outcome.error_popup)
         if outcome.finished is not None:
             self.result = outcome.finished
             log_event('lobby finished: role=%s room_id=%s', self.result.role, self.result.room_id)
@@ -239,9 +243,9 @@ class _LobbyApp:
         self._root.destroy()
 
 
-def run_lobby(ws: WsClient, username: str) -> Optional[LobbyResult]:
+def run_lobby(ws: WsClient, username: str, messagebox_module=messagebox) -> Optional[LobbyResult]:
     """Blocks (runs its own Tkinter mainloop) until the user starts a game
     or closes the window. Returns None if closed without starting."""
-    app = _LobbyApp(ws, username)
+    app = _LobbyApp(ws, username, messagebox_module=messagebox_module)
     app.run()
     return app.result

@@ -26,9 +26,11 @@ class MouseController:
 
     def __init__(self,
                  click_handler: Callable[[int, int], bool],
-                 jump_handler: Optional[Callable[[int, int], None]] = None):
+                 jump_handler: Optional[Callable[[int, int], None]] = None,
+                 clock: Callable[[], float] = time.monotonic):
         self._click_handler = click_handler
         self._jump_handler  = jump_handler
+        self._clock = clock
         self._last_time_ms: float = 0.0
         self._last_x: int = -9999
         self._last_y: int = -9999
@@ -44,7 +46,7 @@ class MouseController:
         if event != MouseEventType.LEFT_DOWN:
             return
 
-        now_ms = time.monotonic() * 1000.0
+        now_ms = self._clock() * 1000.0
         dt     = now_ms - self._last_time_ms
         dx     = abs(x - self._last_x)
         dy     = abs(y - self._last_y)

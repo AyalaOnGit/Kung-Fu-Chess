@@ -3,9 +3,9 @@ import asyncio
 import pytest
 
 from core.bus import AsyncMessageBus
-from game.engine_bridge import EngineEventRelay
+from game.engine_bridge import EngineEventRelay, _translate
 from game.engine_factory import build_game_stack
-from game.events import GameOver, PieceArrived, PieceCaptured
+from game.events import GameOver, PieceArrived, PieceCaptured, Promotion
 
 from kungfu_chess.model.board import Board
 from kungfu_chess.model.piece import Piece, Color, Kind
@@ -115,3 +115,48 @@ async def test_tick_publishes_capture_and_game_over_when_king_is_captured():
         assert engine.game_over
     finally:
         unsubscribe()
+
+
+@pytest.mark.asyncio
+async def test_tick_publishes_promotion_when_a_pieces_kind_changes():
+    """Mirrors kungfu_chess's own snapshot_diff test (test_kind_change_yields_
+    promotion): flipping a live piece's .kind directly (the same shape a real
+    pawn-reaches-the-back-rank promotion takes -- the board grid position
+    doesn't move, only the kind) is enough for diff_snapshots to infer it;
+    relay.tick() just has to translate that into a Promotion event."""
+    board = _two_king_board(pawn=Piece(id=1, color=Color.WHITE, kind=Kind.PAWN, cell=Position(1, 0)))
+    engine = build_game_stack(board)
+    bus = AsyncMessageBus()
+    relay = EngineEventRelay(engine, bus, topic='room:test')
+
+    received = []
+    got_it = asyncio.Event()
+
+    async def handler(event):
+        received.append(event)
+        got_it.set()
+
+    unsubscribe = bus.subscribe('room:test', handler)
+    try:
+        engine.board.piece_at(Position(1, 0)).kind = Kind.QUEEN
+        relay.tick()
+
+        await asyncio.wait_for(got_it.wait(), timeout=1.0)
+        assert len(received) == 1
+        assert isinstance(received[0], Promotion)
+        assert received[0].piece.kind is Kind.QUEEN
+        assert received[0].old_kind is Kind.PAWN
+        assert received[0].new_kind is Kind.QUEEN
+    finally:
+        unsubscribe()
+
+
+def test_translate_raises_for_an_unrecognized_diff_event_type():
+    """_translate's final `raise ValueError` guards against diff_snapshots
+    (kungfu_chess-side) ever returning an event_type this bridge doesn't
+    know how to translate -- the 4 real event types it does know about are
+    exhaustive today, so this defensive branch is only reachable with a
+    made-up event_type. _translate is a plain, private module-level
+    function that needs no engine/bus/board to call directly."""
+    with pytest.raises(ValueError, match='unknown diff event type'):
+        _translate('some_bogus_type', None)

@@ -8,6 +8,7 @@ from itertools import count
 
 import pytest
 
+from kungfu_chess.config import JUMP_DURATION_MS
 from kungfu_chess.engine_builder import build_engine
 from kungfu_chess.interaction.board_mapper import BoardMapper
 from kungfu_chess.model.board import Board
@@ -200,3 +201,57 @@ def test_jump_request_tracks_a_pending_motion():
 def test_jump_request_on_empty_cell_is_a_no_op():
     facade, mapper = _facade()
     facade.request_jump(*_center_px(0, 0))  # must not raise
+
+
+def test_jump_request_out_of_bounds_is_a_no_op():
+    rook = _piece(Color.WHITE, Kind.ROOK, 0, 0)
+    facade, mapper = _facade(rook)
+    events = []
+    facade.subscribe(events.append)
+
+    facade.request_jump(-100, -100)  # off the mapped board entirely
+
+    assert events == []
+    assert facade.get_pending_motion(rook.id) is None
+
+
+def test_pawn_promotion_publishes_promotion_event():
+    pawn = _piece(Color.WHITE, Kind.PAWN, 1, 0)
+    warmup = _piece(Color.WHITE, Kind.ROOK, 7, 0)
+    facade, mapper = _facade(pawn, warmup)
+
+    # Warm-up move establishes _diff_and_publish_events' baseline snapshot,
+    # same reasoning as the other diff-based tests above.
+    facade.request_click(*_center_px(7, 0))
+    facade.request_click(*_center_px(7, 1))
+    facade.tick(1000)
+
+    events = []
+    facade.subscribe(events.append)
+    facade.request_click(*_center_px(1, 0))
+    facade.request_click(*_center_px(0, 0))  # single step onto the last rank
+    facade.tick(1000)
+
+    promotions = [e for e in events if hasattr(e, 'new_kind')]
+    assert len(promotions) == 1
+    assert promotions[0].new_kind is Kind.QUEEN
+
+
+def test_jump_request_rejected_while_piece_is_still_mid_jump_publishes_move_rejected():
+    """A second jump attempted while the piece is still airborne from the
+    first one must be rejected by the controller/engine -- and that
+    rejection must surface as a MoveRejected event, not silently queue an
+    animation for a jump that never actually happened."""
+    rook = _piece(Color.WHITE, Kind.ROOK, 0, 0)
+    facade, mapper = _facade(rook)
+
+    facade.request_jump(*_center_px(0, 0))  # first jump: still airborne
+    facade.tick(1.0)  # well under JUMP_DURATION_MS -- rook is still JUMPING
+
+    events = []
+    facade.subscribe(events.append)
+    facade.request_jump(*_center_px(0, 0))  # rejected -- already mid-jump
+
+    rejected = [e for e in events if isinstance(e, MoveRejected)]
+    assert len(rejected) == 1
+    assert rejected[0].piece is rook

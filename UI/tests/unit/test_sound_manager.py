@@ -43,13 +43,9 @@ def test_sound_manager_disabled_never_touches_winsound():
     # No exception is the assertion: a disabled manager must be silent no matter what it's fed.
 
 
-def test_sound_manager_picks_win_or_lose_tone_by_local_color(monkeypatch, tmp_path):
-    import audio.sound_manager as sound_manager_module
-    monkeypatch.setattr(sound_manager_module, '_ASSETS_DIR', tmp_path)
-
+def test_sound_manager_picks_win_or_lose_tone_by_local_color(tmp_path):
     played = []
-    manager = SoundManager(my_color=Color.WHITE, enabled=True)
-    monkeypatch.setattr(manager, '_play', played.append)
+    manager = SoundManager(my_color=Color.WHITE, enabled=True, assets_dir=tmp_path, player=played.append)
 
     manager.on_event(GameOver(winner=Color.WHITE, loser=Color.BLACK))
     assert played == ['win']
@@ -59,13 +55,9 @@ def test_sound_manager_picks_win_or_lose_tone_by_local_color(monkeypatch, tmp_pa
     assert played == ['lose']
 
 
-def test_sound_manager_plays_neutral_game_over_when_no_local_color(monkeypatch, tmp_path):
-    import audio.sound_manager as sound_manager_module
-    monkeypatch.setattr(sound_manager_module, '_ASSETS_DIR', tmp_path)
-
+def test_sound_manager_plays_neutral_game_over_when_no_local_color(tmp_path):
     played = []
-    manager = SoundManager(my_color=None, enabled=True)
-    monkeypatch.setattr(manager, '_play', played.append)
+    manager = SoundManager(my_color=None, enabled=True, assets_dir=tmp_path, player=played.append)
 
     manager.on_event(GameOver(winner=Color.WHITE, loser=Color.BLACK))
     assert played == ['game_over']
@@ -73,6 +65,38 @@ def test_sound_manager_plays_neutral_game_over_when_no_local_color(monkeypatch, 
 
 def test_tone_specs_cover_every_event_the_manager_handles():
     assert {'move', 'capture', 'game_start', 'game_over', 'win', 'lose'} == set(_TONE_SPECS)
+
+
+def test_play_invokes_the_injected_player_with_the_generated_tones_path_available(tmp_path):
+    """enabled=True generates real tone .wav files under tmp_path (no
+    mocking needed -- it's cheap, real file I/O); the injected `player`
+    callable stands in for the real winsound.PlaySound call so the test
+    doesn't depend on an actual audio device."""
+    played = []
+    manager = SoundManager(my_color=Color.WHITE, enabled=True, assets_dir=tmp_path, player=played.append)
+
+    manager._play('move')
+
+    assert played == ['move']
+    assert manager._paths['move'].exists()
+
+
+def test_play_is_a_no_op_for_a_name_with_no_known_tone(tmp_path):
+    played = []
+    manager = SoundManager(my_color=Color.WHITE, enabled=True, assets_dir=tmp_path, player=played.append)
+
+    manager._play('not_a_real_tone_name')  # must not raise
+
+    assert played == []
+
+
+def test_play_without_an_injected_player_calls_the_real_winsound_backend(tmp_path):
+    """No `player` override: exercises the real winsound.PlaySound call
+    (SND_ASYNC, so this returns immediately -- matches this project's
+    documented Windows-only environment)."""
+    manager = SoundManager(my_color=Color.WHITE, enabled=True, assets_dir=tmp_path)
+
+    manager._play('move')  # must not raise
 
 
 if __name__ == '__main__':

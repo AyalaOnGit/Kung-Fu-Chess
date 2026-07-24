@@ -113,6 +113,32 @@ async def test_unsubscribe_is_idempotent():
 
 
 @pytest.mark.asyncio
+async def test_unsubscribe_cancels_a_handler_mid_flight_cleanly():
+    """unsubscribe() cancels the consumer task outright, even while it's
+    in the middle of awaiting a slow handler -- _consume's own
+    `except asyncio.CancelledError: raise` (as opposed to the bare
+    `except Exception` below it) must let that cancellation keep
+    propagating rather than swallowing it like any other handler error."""
+    bus = AsyncMessageBus()
+    handler_started = asyncio.Event()
+
+    async def slow_handler(event):
+        handler_started.set()
+        await asyncio.sleep(10)  # never completes on its own
+
+    unsubscribe = bus.subscribe('room:1', slow_handler)
+    task = bus._subscriptions['room:1'][0].task
+    bus.publish('room:1', 'x')
+    await _wait_for(handler_started)
+
+    unsubscribe()  # cancels the task while it's inside slow_handler's await
+    await asyncio.sleep(0.05)  # let the cancellation actually propagate
+
+    assert task.cancelled()
+    assert bus._subscriptions == {}
+
+
+@pytest.mark.asyncio
 async def test_handler_exception_does_not_crash_bus_or_other_subscribers():
     bus = AsyncMessageBus()
     survivor_received = asyncio.Event()

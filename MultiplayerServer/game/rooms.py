@@ -23,6 +23,8 @@ import time
 from typing import Awaitable, Callable, Dict, List, Optional
 
 from kungfu_chess.engine.game_engine import GameEngine
+from kungfu_chess.io.board_factory import standard_board
+from kungfu_chess.model.board import Board
 from kungfu_chess.model.piece import Color
 
 from config import TICK_INTERVAL_MS
@@ -186,16 +188,36 @@ class RoomManager:
 
     def __init__(self, bus: AsyncMessageBus, session_manager: SessionManager,
                  on_game_over: Optional[OnGameOver] = None, log_events: bool = True,
-                 broadcaster: Optional[Broadcaster] = None):
+                 broadcaster: Optional[Broadcaster] = None,
+                 board_factory: Optional[Callable[[], Board]] = None,
+                 id_factory: Optional[Callable[[], str]] = None):
+        """
+        board_factory: builds the starting Board for any create_room() call
+        that doesn't pass its own engine -- both a manually created room
+        (network/dispatch.py's create_room handler) and a matchmade one
+        (main.py's on_paired) go through this single method, so wiring the
+        override here (rather than at either call site individually) covers
+        both at once. None (the default) means the real standard chess
+        starting position, same pattern as `broadcaster` just above.
+
+        id_factory: generates each new room_id; defaults to the real
+        secrets.token_urlsafe(4). Overriding it is dependency injection for
+        tests that need deterministic or forced-collision ids, instead of
+        patching the secrets module.
+        """
         self._bus = bus
         self._session_manager = session_manager
         self._on_game_over = on_game_over
         self._log_events = log_events
         self._broadcaster = broadcaster if broadcaster is not None else WebsocketBroadcaster()
+        self._board_factory = board_factory if board_factory is not None else standard_board
+        self._id_factory = id_factory if id_factory is not None else (lambda: secrets.token_urlsafe(4))
         self._rooms: Dict[str, Room] = {}
         self._unsubscribers: Dict[str, List[Unsubscribe]] = {}
 
     def create_room(self, engine: Optional[GameEngine] = None) -> Room:
+        if engine is None:
+            engine = build_game_stack(self._board_factory())
         room_id = self._generate_room_id()
         room = Room(room_id, self._bus, engine=engine, on_game_over=self._on_game_over)
         self._rooms[room_id] = room
@@ -224,7 +246,7 @@ class RoomManager:
 
     def _generate_room_id(self) -> str:
         for _ in range(_ROOM_ID_ATTEMPTS):
-            candidate = secrets.token_urlsafe(4)
+            candidate = self._id_factory()
             if candidate not in self._rooms:
                 return candidate
         raise RuntimeError(f'could not generate a unique room_id in {_ROOM_ID_ATTEMPTS} attempts')

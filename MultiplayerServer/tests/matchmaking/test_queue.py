@@ -135,6 +135,31 @@ def test_find_pairings_each_user_appears_in_at_most_one_pairing():
     assert len(queue) == 0
 
 
+def test_find_pairings_skips_a_candidate_already_claimed_by_an_earlier_pairing():
+    """The inner loop's own `if other.user_id in paired_ids: continue` --
+    distinct from the outer loop's identical-looking skip just above it --
+    fires when a later-joined candidate was already claimed by an earlier
+    entry's pairing before this entry gets its own turn to scan for a
+    partner. Join order: 1 (elo 1000), 2 (elo 1200), 3 (elo 1010), 4 (elo
+    1200); elo_range=50. Entry 1 pairs with 3 (only one in range). Entry 2
+    then scans [3, 4]: 3 is already claimed (hits the inner `continue`),
+    so it falls through to 4."""
+    clock = FakeClock(start=0.0)
+    queue = MatchmakingQueue(clock=clock, elo_range=50)
+    queue.enqueue(user_id=1, elo=1000)
+    clock.advance(1)
+    queue.enqueue(user_id=2, elo=1200)
+    clock.advance(1)
+    queue.enqueue(user_id=3, elo=1010)
+    clock.advance(1)
+    queue.enqueue(user_id=4, elo=1200)
+
+    pairs = queue.find_pairings(clock.now())
+
+    assert set(pairs) == {(1, 3), (2, 4)}
+    assert len(queue) == 0
+
+
 def test_find_pairings_respects_max_pairs():
     clock = FakeClock()
     queue = MatchmakingQueue(clock=clock, elo_range=1000)

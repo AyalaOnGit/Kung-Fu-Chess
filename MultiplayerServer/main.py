@@ -1,6 +1,7 @@
 from __future__ import annotations
 import asyncio
 import logging
+from typing import Callable, Optional
 
 from websockets.asyncio.server import serve
 from websockets.exceptions import ConnectionClosed
@@ -30,7 +31,8 @@ HOST = '0.0.0.0'
 PORT = 8765
 
 
-async def run(host: str = HOST, port: int = PORT, db_path: str = DB_PATH) -> None:
+async def run(host: str = HOST, port: int = PORT, db_path: str = DB_PATH,
+              board_factory: Optional[Callable[[], object]] = None) -> None:
     """
     Composition root: builds every sub-package's objects, wires them
     together, serves forever. Nothing else in the codebase should call
@@ -43,6 +45,18 @@ async def run(host: str = HOST, port: int = PORT, db_path: str = DB_PATH) -> Non
     since on_game_over must not re-derive it by looking up sessions by
     role: a disconnect-timeout resignation's loser has already been
     removed from session_manager by the time their game ends.
+
+    board_factory: builds the starting board for every fresh room this
+    process creates (both a manually created room and a matchmade one --
+    both ultimately go through RoomManager.create_room(), which is where
+    this is actually threaded to; see game/rooms.py). None (the default)
+    means "use the real standard chess starting position" -- RoomManager
+    itself owns that default so this module never has to import anything
+    kungfu_chess-related just to spell it out (§1 in network/dispatch.py's
+    docstring: "the only package that imports kungfu_chess is game/").
+    Overriding it is dependency injection for tests that need a
+    deterministic, non-standard board (e.g. a king-capture-in-one-move
+    scenario) instead of patching game/engine_factory.py's internals.
     """
     configure_logging()
 
@@ -121,7 +135,7 @@ async def run(host: str = HOST, port: int = PORT, db_path: str = DB_PATH) -> Non
         # unconditionally is simpler than special-casing it.
         asyncio.create_task(_unmatch_and_end_room())
 
-    room_manager = RoomManager(bus, session_manager, on_game_over=on_game_over)
+    room_manager = RoomManager(bus, session_manager, on_game_over=on_game_over, board_factory=board_factory)
 
     async def on_paired(white_user_id: int, black_user_id: int) -> None:
         white = session_manager.get_by_user_id(white_user_id)

@@ -5,6 +5,8 @@ Uses a fake WsClient (no real socket) since ws_client.py's own networking is
 already covered end-to-end by test_ws_client.py -- these tests are about
 NetworkGameFacade's wire-event translation and role gating.
 """
+import pytest
+
 from kungfu_chess.config import COOLDOWN_MS, JUMP_DURATION_MS
 from kungfu_chess.interaction.board_mapper import BoardMapper
 from kungfu_chess.model.piece import Color, Kind, PieceState
@@ -396,6 +398,141 @@ def test_unrecognized_envelope_types_are_ignored_without_error():
     ws.queue('accepted', {})
     ws.queue('pong', {})
     facade.tick(16.0)  # must not raise
+
+
+def test_my_color_reflects_the_assigned_role():
+    white_facade, _ = _facade(role='white')
+    black_facade, _ = _facade(role='black')
+    viewer_facade, _ = _facade(role='viewer')
+
+    assert white_facade.my_color is Color.WHITE
+    assert black_facade.my_color is Color.BLACK
+    assert viewer_facade.my_color is None
+
+
+def test_initial_state_seeds_cooldown_for_an_already_cooling_piece():
+    """A resync/rejoin can hand us a piece that's already mid-cooldown --
+    _seed_cooldowns must recreate that remaining cooldown immediately, not
+    just for cooldowns that start after construction."""
+    state = {
+        'pieces': [
+            _piece_dict(1, 'w', 'K', (7, 4)),
+            _piece_dict(2, 'b', 'K', (0, 4)),
+            _piece_dict(3, 'w', 'R', (7, 0), state='cooling', cooldown_ratio=0.5),
+        ],
+        'game_over': False, 'clock_ms': 0,
+    }
+    facade, _ = _facade(role='white', state=state)
+    rook = facade.board.piece_at(Position(7, 0))
+
+    assert facade.get_cooldown_ratio(rook) == pytest.approx(0.5)
+
+
+def test_reselecting_a_different_friendly_piece_switches_selection_instead_of_moving():
+    facade, ws = _facade(role='white')
+    facade.request_click(10, 710)  # select white rook at (7,0)
+    assert facade.get_selected_pos() == Position(7, 0)
+
+    # King is also white and sits at (7,4) -> pixel (col*100, row*100) = (400, 700).
+    # Clicking it should reselect, not attempt a move.
+    handled = facade.request_click(400, 710)
+
+    assert handled is False
+    assert facade.get_selected_pos() == Position(7, 4)
+    assert ws.sent == []
+
+
+def test_request_jump_sends_a_jump_command_for_an_own_piece():
+    facade, ws = _facade(role='white')
+    facade.request_jump(10, 710)  # own rook at (7,0)
+    assert ws.sent == [('jump', {'cell': [7, 0]})]
+
+
+def test_request_jump_on_empty_cell_is_a_no_op():
+    facade, ws = _facade(role='white')
+    facade.request_jump(10, 410)  # empty cell
+    assert ws.sent == []
+
+
+def test_request_jump_on_opponents_piece_is_a_no_op():
+    facade, ws = _facade(role='black')
+    facade.request_jump(10, 710)  # white rook
+    assert ws.sent == []
+
+
+def test_move_accepted_for_an_unknown_piece_id_is_ignored():
+    facade, ws = _facade(role='white')
+    events = []
+    facade.subscribe(events.append)
+
+    ws.queue('move_accepted', {'piece': _piece_dict(999, 'w', 'R', (7, 0)), 'src': [7, 0], 'dest': [4, 0]})
+    facade.tick(16.0)  # must not raise
+
+    assert events == []
+
+
+def test_jump_accepted_for_an_unknown_piece_id_is_ignored():
+    facade, ws = _facade(role='white')
+    events = []
+    facade.subscribe(events.append)
+
+    ws.queue('jump_accepted', {'piece': _piece_dict(999, 'w', 'R', (7, 0)), 'cell': [7, 0]})
+    facade.tick(16.0)  # must not raise
+
+    assert events == []
+
+
+def test_piece_arrived_for_an_unknown_piece_id_is_ignored():
+    facade, ws = _facade(role='white')
+    events = []
+    facade.subscribe(events.append)
+
+    ws.queue('piece_arrived', {'piece': _piece_dict(999, 'w', 'R', (7, 0)), 'pos': [4, 0]})
+    facade.tick(16.0)  # must not raise
+
+    assert events == []
+
+
+def test_piece_halted_published_when_arrival_lands_short_of_the_requested_destination():
+    """A move blocked mid-flight settles at some cell other than the
+    originally requested destination -- the client must surface that as a
+    PieceHalted event rather than silently accepting the mismatch."""
+    facade, ws = _facade(role='white')
+    events = []
+    facade.subscribe(events.append)
+
+    ws.queue('move_accepted', {'piece': _piece_dict(3, 'w', 'R', (7, 0)), 'src': [7, 0], 'dest': [4, 0]})
+    facade.tick(16.0)
+    # Server reports it actually landed at (5, 0), short of the requested (4, 0).
+    ws.queue('piece_arrived', {'piece': _piece_dict(3, 'w', 'R', (7, 0)), 'pos': [5, 0]})
+    facade.tick(16.0)
+
+    from state.game_events import PieceHalted
+    halted = [e for e in events if isinstance(e, PieceHalted)]
+    assert len(halted) == 1
+    assert halted[0].halted_at == Position(5, 0)
+    assert facade.board.piece_at(Position(5, 0)).id == 3
+
+
+def test_promotion_for_an_unknown_piece_falls_back_to_wire_data():
+    """If the promoted piece isn't found on this mirror board (shouldn't
+    normally happen, but defensively handled), the event is still published
+    using the piece reconstructed straight from the wire payload."""
+    facade, ws = _facade(role='white')
+    events = []
+    facade.subscribe(events.append)
+
+    ws.queue('promotion', {'piece': _piece_dict(999, 'w', 'P', (0, 1)), 'old_kind': 'P', 'new_kind': 'Q'})
+    facade.tick(16.0)
+
+    promotions = [e for e in events if isinstance(e, Promotion)]
+    assert len(promotions) == 1
+    assert promotions[0].piece.id == 999
+    # Piece falls back to the wire's own 'piece' payload (still showing the
+    # pre-promotion kind) -- new_kind is what carries the promoted kind.
+    assert promotions[0].piece.kind is Kind.PAWN
+    assert promotions[0].new_kind is Kind.QUEEN
+    assert promotions[0].pos == Position(0, 1)
 
 
 if __name__ == '__main__':

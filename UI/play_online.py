@@ -39,8 +39,17 @@ def _load_game_main():
     return module
 
 
-def main(uri: str = DEFAULT_URI) -> None:
-    ws_client, username, resume = connect_and_login(uri)
+def main(uri: str = DEFAULT_URI, *, connect_and_login_fn=None, run_lobby_fn=None, load_game_main_fn=None) -> None:
+    """
+    :param connect_and_login_fn: injectable stand-in for connect_and_login(), for tests.
+    :param run_lobby_fn: injectable stand-in for run_lobby(), for tests.
+    :param load_game_main_fn: injectable stand-in for _load_game_main(), for tests.
+    """
+    connect = connect_and_login_fn or connect_and_login
+    lobby = run_lobby_fn or run_lobby
+    loader = load_game_main_fn or _load_game_main
+
+    ws_client, username, resume = connect(uri)
 
     white_username = white_elo = black_username = black_elo = None
     if resume is not None:
@@ -52,7 +61,7 @@ def main(uri: str = DEFAULT_URI) -> None:
         white_username, white_elo = resume.data.get('white_username'), resume.data.get('white_elo')
         black_username, black_elo = resume.data.get('black_username'), resume.data.get('black_elo')
     else:
-        result = run_lobby(ws_client, username)
+        result = lobby(ws_client, username)
         if result is None:
             print('Left the lobby without starting a game.')
             ws_client.close()
@@ -64,7 +73,7 @@ def main(uri: str = DEFAULT_URI) -> None:
     print(f'Entering room {room_id} as {role}.')
     log_event('entering room %s as %s', room_id, role)
 
-    game_main = _load_game_main()
+    game_main = loader()
     board_mapper = game_main._build_mapper(game_main.Board(width=8, height=8))
 
     try:

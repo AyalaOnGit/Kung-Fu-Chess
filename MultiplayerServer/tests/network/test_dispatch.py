@@ -1,6 +1,7 @@
 import json
 
 import pytest
+from websockets.exceptions import ConnectionClosed
 
 from core.bus import AsyncMessageBus
 from core.clock import FakeClock
@@ -56,6 +57,15 @@ class _FakeWebSocket:
 
     async def send(self, raw: str) -> None:
         self.sent.append(raw)
+
+
+class _DeadWebSocket:
+    """Stands in for a session whose connection already dropped but whose
+    on_disconnect cleanup hasn't run yet -- send() raises ConnectionClosed,
+    same as a real one would."""
+
+    async def send(self, raw: str) -> None:
+        raise ConnectionClosed(rcvd=None, sent=None)
 
 
 class _Harness:
@@ -173,6 +183,18 @@ async def test_rejected_move_returns_error_with_matching_code():
 
 
 @pytest.mark.asyncio
+async def test_jump_with_no_room_returns_not_in_a_match():
+    h = await _harness()
+    session = h.new_session()
+
+    raw = await h.dispatch(session, json.dumps({'type': 'jump', 'data': {'cell': [0, 0]}}))
+
+    envelope = decode(raw)
+    assert envelope.type == 'error'
+    assert envelope.data == {'code': 'not_in_a_match'}
+
+
+@pytest.mark.asyncio
 async def test_accepted_jump_returns_accepted():
     h = await _harness()
     room = h.room_with_a_rook()
@@ -287,6 +309,18 @@ async def test_login_succeeds_and_attaches_user_id_to_session():
     envelope = decode(raw)
     assert envelope.type == 'logged_in'
     assert login_session.user_id == register_session.user_id
+
+
+@pytest.mark.asyncio
+async def test_login_malformed_payload_is_rejected():
+    h = await _harness()
+    session = h.new_session()
+
+    raw = await h.dispatch(session, json.dumps({'type': 'login', 'data': {'username': 'alice'}}))
+
+    envelope = decode(raw)
+    assert envelope.data == {'code': 'malformed_command'}
+    assert session.user_id is None
 
 
 @pytest.mark.asyncio
@@ -422,6 +456,17 @@ async def test_queue_join_reports_own_elo_and_the_queues_search_range():
 
     envelope = decode(raw)
     assert envelope.data == {'elo': 1200, 'range': 150}
+
+
+@pytest.mark.asyncio
+async def test_queue_cancel_requires_login():
+    h = await _harness()
+    session = h.new_session()
+
+    raw = await h.dispatch(session, json.dumps({'type': 'queue_cancel', 'data': {}}))
+
+    envelope = decode(raw)
+    assert envelope.data == {'code': 'not_authenticated'}
 
 
 @pytest.mark.asyncio
@@ -710,5 +755,26 @@ async def test_join_room_while_already_in_a_room_is_rejected():
     raw = await h.dispatch(creator, json.dumps({'type': 'join_room', 'data': {'room_id': room_id}}))
 
     assert decode(raw).data == {'code': 'already_in_a_room'}
+
+    await h.room_manager.end_room(room_id)
+
+
+@pytest.mark.asyncio
+async def test_join_room_notify_swallows_a_dead_recipient_websocket():
+    """The creator's connection may have already dropped without
+    on_disconnect having run yet (e.g. between a real abnormal close and
+    the server noticing) -- _notify_room_of_new_arrival's send to that
+    stale websocket must not blow up the joiner's own join_room reply."""
+    h = await _harness()
+    creator = h.session_manager.admit(websocket=_DeadWebSocket())
+    await _register(h, creator, 'alice')
+    create_raw = await h.dispatch(creator, json.dumps({'type': 'create_room', 'data': {}}))
+    room_id = decode(create_raw).data['room_id']
+
+    joiner = h.new_session()
+    await _register(h, joiner, 'bob')
+    raw = await h.dispatch(joiner, json.dumps({'type': 'join_room', 'data': {'room_id': room_id}}))
+
+    assert decode(raw).type == 'room_joined'
 
     await h.room_manager.end_room(room_id)

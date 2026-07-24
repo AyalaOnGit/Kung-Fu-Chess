@@ -38,9 +38,12 @@ class WsClient:
 
     # --- lifecycle ---
 
-    def connect(self, timeout: float = 10.0) -> None:
-        """Start the background thread and block until connected (or raise)."""
-        self._thread = threading.Thread(target=self._run_loop, daemon=True)
+    def connect(self, timeout: float = 10.0, run_loop=None) -> None:
+        """Start the background thread and block until connected (or raise).
+
+        :param run_loop: injectable stand-in for self._run_loop, for tests.
+        """
+        self._thread = threading.Thread(target=run_loop or self._run_loop, daemon=True)
         self._thread.start()
         if not self._connected.wait(timeout):
             raise ConnectionError(f'timed out connecting to {self._uri}')

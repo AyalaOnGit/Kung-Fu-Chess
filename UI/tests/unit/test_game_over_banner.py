@@ -78,6 +78,16 @@ def test_opponent_joined_updates_the_black_name_before_game_over():
     assert banner.get_info().title == 'bob wins!'
 
 
+def test_a_none_winner_produces_a_draw_title():
+    """Defensive branch: kung-fu chess never actually ends in a draw today
+    (only king capture/resignation), but GameOver.winner=None is handled
+    anyway rather than crashing the dialog, in case that ever changes."""
+    banner = GameOverBanner(white_name='alice', black_name='bob')
+    banner.on_event(GameOver(winner=None, loser=None))
+
+    assert banner.get_info().title == 'Draw!'
+
+
 def test_opponent_joined_for_white_updates_the_white_name():
     banner = GameOverBanner(white_name='Waiting for opponent...', black_name='bob')
     banner.on_event(OpponentJoined(role='white', username='alice', elo=1200))

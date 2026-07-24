@@ -14,6 +14,7 @@ from typing import Callable, Optional
 import numpy as np
 
 from vendor.img import Img, MouseEventType
+from vendor.img import cv2 as _default_cv2
 from ui_config import SCALE_DEFAULT, SCALE_STEP, SCALE_MIN, SCALE_MAX
 
 
@@ -28,19 +29,20 @@ class Window:
       - Handle +/- keys to resize the display
     """
 
-    def __init__(self, title: str, width: int, height: int):
+    def __init__(self, title: str, width: int, height: int, cv2_module=_default_cv2):
         self._title  = title
         self._width  = width
         self._height = height
         self._scale  = SCALE_DEFAULT
         self._window_open = True
+        self._cv2 = cv2_module
         self._mouse_callback: Optional[Callable[[MouseEventType, int, int, int, int], None]] = None
 
     def set_mouse_callback(self, callback: Callable[[MouseEventType, int, int, int, int], None]) -> None:
         """Set the mouse callback; coordinates are mapped back to logical (unscaled) space."""
         self._mouse_callback = callback
-        Img.create_window(self._title)
-        Img.set_mouse_callback(self._title, self._on_mouse)
+        Img.create_window(self._title, cv2_module=self._cv2)
+        Img.set_mouse_callback(self._title, self._on_mouse, cv2_module=self._cv2)
 
     def _on_mouse(self, event: int, x: int, y: int, flags: int, param: None) -> None:
         """Map scaled pixel coords back to logical coords before forwarding."""
@@ -82,14 +84,14 @@ class Window:
             new_h = max(1, int(img.img.shape[0] * self._scale))
             img.resize(new_w, new_h)
 
-        if not img.show_in_window(self._title):
+        if not img.show_in_window(self._title, cv2_module=self._cv2):
             self._window_open = False
             return
 
-        key = Img.wait_key(1)
+        key = Img.wait_key(1, cv2_module=self._cv2)
         self._handle_key(key)
 
-        if not Img.is_window_visible(self._title):
+        if not Img.is_window_visible(self._title, cv2_module=self._cv2):
             self._window_open = False
 
     def _handle_key(self, key: int) -> None:
@@ -110,5 +112,5 @@ class Window:
 
     def close(self) -> None:
         """Close the window."""
-        Img.destroy_window(self._title)
+        Img.destroy_window(self._title, cv2_module=self._cv2)
         self._window_open = False

@@ -53,6 +53,25 @@ async def test_black_win_updates_elo_the_other_direction(repos):
 
 
 @pytest.mark.asyncio
+async def test_unresolvable_user_id_skips_persistence_entirely(repos):
+    """A non-None but nonexistent user_id (e.g. deleted mid-game, or any
+    other stale id) must be treated the same as never-logged-in -- get_by_id
+    returning None still has to skip persistence rather than crash trying
+    to read .elo off of None."""
+    users_repo, matches_repo = repos
+    white = await users_repo.create('white_player', 'h', 's')
+
+    rating_change = await record_match_result(
+        users_repo, matches_repo,
+        white_user_id=white.id, black_user_id=999999,
+        white_won=True, result_reason='king_captured',
+    )
+
+    assert (await users_repo.get_by_id(white.id)).elo == 1200
+    assert rating_change is None
+
+
+@pytest.mark.asyncio
 async def test_anonymous_player_skips_persistence_entirely(repos):
     users_repo, matches_repo = repos
     white = await users_repo.create('white_player', 'h', 's')

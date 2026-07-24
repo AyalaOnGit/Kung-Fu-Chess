@@ -45,13 +45,15 @@ class SoundManager:
         "mine") plays a neutral game_over tone instead.
     """
 
-    def __init__(self, my_color: Optional[Color] = None, enabled: bool = True):
+    def __init__(self, my_color: Optional[Color] = None, enabled: bool = True,
+                 assets_dir: pathlib.Path = _ASSETS_DIR, player: Optional[callable] = None):
         self._my_color = my_color
         self._enabled = enabled and _SOUND_AVAILABLE
+        self._player = player
         self._paths = {}
         if self._enabled:
             for name, (freqs, duration_ms) in _TONE_SPECS.items():
-                self._paths[name] = ensure_tone(_ASSETS_DIR / f'{name}.wav', freqs, duration_ms)
+                self._paths[name] = ensure_tone(assets_dir / f'{name}.wav', freqs, duration_ms)
 
     def play_start(self) -> None:
         self._play('game_start')
@@ -77,5 +79,8 @@ class SoundManager:
             return
         path = self._paths.get(name)
         if path is None:
+            return
+        if self._player is not None:
+            self._player(name)
             return
         winsound.PlaySound(str(path), winsound.SND_FILENAME | winsound.SND_ASYNC)

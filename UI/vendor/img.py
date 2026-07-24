@@ -176,17 +176,22 @@ class Img:
         cv2.line(self.img, (x1, y1), (x2, y2), color, thickness)
         return self
 
-    def show(self):
+    def show(self, cv2_module=cv2):
         if self.img is None:
             raise ValueError("Image not loaded.")
-        cv2.imshow("Image", self.img)
-        cv2.waitKey(0)
-        cv2.destroyAllWindows()
+        cv2_module.imshow("Image", self.img)
+        cv2_module.waitKey(0)
+        cv2_module.destroyAllWindows()
 
     # --- Window management (used by graphics.window.Window) ---
+    #
+    # Every method below takes an injectable `cv2_module` (defaulting to the
+    # real cv2), so tests can pass a small hand-written fake backend instead
+    # of patching the cv2 import -- avoids ever opening a real OS window
+    # during the test suite.
 
     @staticmethod
-    def create_window(title: str) -> None:
+    def create_window(title: str, cv2_module=cv2) -> None:
         # WINDOW_AUTOSIZE (not WINDOW_NORMAL): the window always exactly
         # matches whatever image imshow() last gave it, and the user can't
         # drag its border to some other size. Mouse coordinates from cv2
@@ -199,13 +204,13 @@ class Img:
         # the app's own +/- keys (graphics.window.Window._handle_key),
         # which resize the *image* before each imshow() -- AUTOSIZE follows
         # that resize automatically.
-        cv2.namedWindow(title, cv2.WINDOW_AUTOSIZE)
+        cv2_module.namedWindow(title, cv2.WINDOW_AUTOSIZE)
 
     @staticmethod
-    def set_mouse_callback(title: str, callback) -> None:
-        cv2.setMouseCallback(title, callback)
+    def set_mouse_callback(title: str, callback, cv2_module=cv2) -> None:
+        cv2_module.setMouseCallback(title, callback)
 
-    def show_in_window(self, title: str) -> bool:
+    def show_in_window(self, title: str, cv2_module=cv2) -> bool:
         """
         Display self.img in the named window (creates it if needed).
 
@@ -215,26 +220,26 @@ class Img:
         if self.img is None:
             raise ValueError("Image not loaded.")
         try:
-            cv2.namedWindow(title, cv2.WINDOW_AUTOSIZE)
-            cv2.imshow(title, self.img)
+            cv2_module.namedWindow(title, cv2.WINDOW_AUTOSIZE)
+            cv2_module.imshow(title, self.img)
             return True
-        except cv2.error:
+        except cv2_module.error:
             return False
 
     @staticmethod
-    def wait_key(delay_ms: int) -> int:
-        return cv2.waitKey(delay_ms) & 0xFF
+    def wait_key(delay_ms: int, cv2_module=cv2) -> int:
+        return cv2_module.waitKey(delay_ms) & 0xFF
 
     @staticmethod
-    def is_window_visible(title: str) -> bool:
+    def is_window_visible(title: str, cv2_module=cv2) -> bool:
         try:
-            return cv2.getWindowProperty(title, cv2.WND_PROP_VISIBLE) >= 0
-        except cv2.error:
+            return cv2_module.getWindowProperty(title, cv2.WND_PROP_VISIBLE) >= 0
+        except cv2_module.error:
             return False
 
     @staticmethod
-    def destroy_window(title: str) -> None:
+    def destroy_window(title: str, cv2_module=cv2) -> None:
         try:
-            cv2.destroyWindow(title)
-        except cv2.error:
+            cv2_module.destroyWindow(title)
+        except cv2_module.error:
             pass

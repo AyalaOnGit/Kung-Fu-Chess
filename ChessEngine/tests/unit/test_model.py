@@ -24,6 +24,12 @@ class TestPosition(unittest.TestCase):
         self.assertEqual(len(s), 1)
 
 
+class TestColor(unittest.TestCase):
+    def test_opponent_returns_other_color(self):
+        self.assertEqual(Color.WHITE.opponent(), Color.BLACK)
+        self.assertEqual(Color.BLACK.opponent(), Color.WHITE)
+
+
 class TestPiece(unittest.TestCase):
     def test_token(self):
         self.assertEqual(W(Kind.ROOK, 0, 0).token(), 'wR')
@@ -147,6 +153,16 @@ class TestBoard(unittest.TestCase):
         b = board_with(W(Kind.ROOK, 0, 0))
         b.load_snapshot([])
         self.assertEqual(b.all_pieces(), [])
+
+    def test_remove_piece_on_empty_cell_raises(self):
+        b = empty_board()
+        with self.assertRaises(BoardError):
+            b.remove_piece(Position(0, 0))
+
+    def test_move_piece_from_empty_cell_raises(self):
+        b = empty_board()
+        with self.assertRaises(BoardError):
+            b.move_piece(Position(0, 0), Position(0, 1))
 
 
 if __name__ == '__main__':

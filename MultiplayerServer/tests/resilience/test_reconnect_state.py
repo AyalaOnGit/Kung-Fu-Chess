@@ -3,6 +3,18 @@ from core.protocol import Role
 from resilience.reconnect_state import ReconnectState
 
 
+def test_len_reports_the_number_of_pending_entries():
+    state = ReconnectState(clock=FakeClock())
+    assert len(state) == 0
+
+    state.mark_disconnected(user_id=1, role=Role.WHITE, room_id='room-a')
+    state.mark_disconnected(user_id=2, role=Role.BLACK, room_id='room-b')
+    assert len(state) == 2
+
+    state.reclaim(1)
+    assert len(state) == 1
+
+
 def test_mark_disconnected_then_reclaim_returns_the_role_and_room_id():
     state = ReconnectState(clock=FakeClock())
     state.mark_disconnected(user_id=1, role=Role.WHITE, room_id='room-a')

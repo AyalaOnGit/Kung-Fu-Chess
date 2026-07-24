@@ -140,3 +140,16 @@ def test_get_current_frame_lazily_loads_if_not_yet_loaded():
     frame = animator.get_current_frame()
 
     assert frame is animations[('RW', 'idle')][0][0]
+
+
+def test_get_current_frame_falls_back_to_blank_if_no_frames_were_loaded():
+    """Defensive branch: _current_frames ending up empty (e.g. a
+    misbehaving loader that returns [] instead of raising, unlike the real
+    SpriteLoader) must still produce a drawable frame rather than an
+    IndexError."""
+    animations = {('RW', 'idle'): ([], SpriteConfig(10.0, True, 'idle'))}
+    animator = _animator(animations)
+
+    frame = animator.get_current_frame()
+
+    assert frame.image.shape == (100, 100, 4)

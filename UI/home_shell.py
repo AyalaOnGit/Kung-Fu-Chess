@@ -30,7 +30,8 @@ def _wait_for_reply(ws: WsClient, *expected_types: str, timeout: float = _REPLY_
     return None
 
 
-def login(ws: WsClient) -> Tuple[str, Optional[Envelope]]:
+def login(ws: WsClient, input_fn=input, getpass_fn=getpass.getpass,
+          log_dir: Optional[str] = None, wait_timeout: float = _REPLY_TIMEOUT_S) -> Tuple[str, Optional[Envelope]]:
     """
     Terminal-only login flow. Checks whether the entered username is
     already registered (check_username) before ever asking for a password,
@@ -38,6 +39,12 @@ def login(ws: WsClient) -> Tuple[str, Optional[Envelope]]:
     "Please enter matching password" for an existing account, or
     "To register, please choose a password" for a new one.
 
+    :param input_fn: injectable stand-in for the builtin input(), for tests.
+    :param getpass_fn: injectable stand-in for getpass.getpass(), for tests.
+    :param log_dir: passed through to configure_client_logging() on success;
+        None uses that function's own default (the real log directory).
+    :param wait_timeout: passed through to every _wait_for_reply() call, so
+        tests can use a short timeout instead of the real 10s default.
     :return: (username, resume_envelope). resume_envelope is the
         'state_sync' envelope if this login reclaimed an in-progress game
         (server-side reconnect within the grace period) -- in that case the
@@ -46,13 +53,13 @@ def login(ws: WsClient) -> Tuple[str, Optional[Envelope]]:
     """
     print('=== Kung-Fu Chess: sign in ===')
     while True:
-        username = input('Username: ').strip()
+        username = input_fn('Username: ').strip()
         if not username:
             print('Username is required.')
             continue
 
         ws.send('check_username', {'username': username})
-        reply = _wait_for_reply(ws, 'username_status', 'error')
+        reply = _wait_for_reply(ws, 'username_status', 'error', timeout=wait_timeout)
         if reply is None:
             print('Server did not respond -- is MultiplayerServer running?')
             continue
@@ -62,31 +69,31 @@ def login(ws: WsClient) -> Tuple[str, Optional[Envelope]]:
 
         exists = reply.data.get('exists', False)
         prompt = 'Please enter matching password: ' if exists else 'To register, please choose a password: '
-        password = getpass.getpass(prompt)
+        password = getpass_fn(prompt)
         if not password:
             print('Password is required.')
             continue
 
         command = 'login' if exists else 'register'
         ws.send(command, {'username': username, 'password': password})
-        reply = _wait_for_reply(ws, 'registered', 'logged_in', 'state_sync', 'error')
+        reply = _wait_for_reply(ws, 'registered', 'logged_in', 'state_sync', 'error', timeout=wait_timeout)
         if reply is None:
             print('Server did not respond.')
             continue
 
         if reply.type == 'registered':
             print(f"Registered as {reply.data['username']} (elo {reply.data['elo']}).")
-            _finish_login(username)
+            _finish_login(username, log_dir=log_dir)
             return username, None
 
         if reply.type == 'logged_in':
             print(f"Welcome back, {username}.")
-            _finish_login(username)
+            _finish_login(username, log_dir=log_dir)
             return username, None
 
         if reply.type == 'state_sync':
             print(f"Welcome back, {username} -- rejoining your in-progress game.")
-            _finish_login(username)
+            _finish_login(username, log_dir=log_dir)
             return username, reply
 
         code = reply.data.get('code')
@@ -100,22 +107,30 @@ def login(ws: WsClient) -> Tuple[str, Optional[Envelope]]:
             print(f"{'Login' if exists else 'Registration'} failed: {code}")
 
 
-def _finish_login(username: str) -> None:
-    configure_client_logging(username)
+def _finish_login(username: str, log_dir: Optional[str] = None) -> None:
+    if log_dir is not None:
+        configure_client_logging(username, log_dir=log_dir)
+    else:
+        configure_client_logging(username)
     log_event('logged in as %s', username)
 
 
-def connect_and_login(uri: str = DEFAULT_URI) -> Tuple[WsClient, str, Optional[Envelope]]:
+def connect_and_login(uri: str = DEFAULT_URI, ws_client_cls=WsClient,
+                       login_fn=login) -> Tuple[WsClient, str, Optional[Envelope]]:
     """Connect to MultiplayerServer and run the shell login flow. Returns
     (ws_client, username, resume_envelope) -- see login()'s docstring for
-    resume_envelope."""
+    resume_envelope.
+
+    :param ws_client_cls: injectable stand-in for WsClient, for tests.
+    :param login_fn: injectable stand-in for login(), for tests.
+    """
     print(f'Connecting to {uri} ...')
-    ws = WsClient(uri)
+    ws = ws_client_cls(uri)
     ws.connect()
     _wait_for_reply(ws, 'connected', timeout=5.0)  # server's greeting on accept
     log_event('connected to %s', uri)
 
-    username, resume_envelope = login(ws)
+    username, resume_envelope = login_fn(ws)
     return ws, username, resume_envelope
 
 

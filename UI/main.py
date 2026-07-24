@@ -60,23 +60,46 @@ def _build_mapper(board: Board) -> BoardMapper:
                         row_boundaries=BOARD_ROW_BOUNDARIES)
 
 
-def run_local_game() -> None:
-    """Local two-player hotseat mode: both colors on one board/window."""
+def run_local_game(window=None, facade=None, sound_manager=None, renderer=None, hud_renderer=None,
+                    clock=None) -> None:
+    """Local two-player hotseat mode: both colors on one board/window.
+
+    The keyword params are all injectable seams for tests (each defaults to
+    the real thing when omitted) -- nothing about normal `python main.py`
+    usage needs to pass any of them.
+    """
     board = standard_board()
     engine = build_engine(board)
     mapper = _build_mapper(board)
-    facade = GameFacade(engine, mapper)
+    if facade is None:
+        facade = GameFacade(engine, mapper)
 
     # Local hotseat mode has no single "local player" color, so GameOver
     # plays a neutral tone rather than a win/lose one (see SoundManager).
-    sound_manager = SoundManager(my_color=None)
+    if sound_manager is None:
+        sound_manager = SoundManager(my_color=None)
 
-    _run_game_loop(facade, board, mapper, sound_manager)
+    _run_game_loop(facade, board, mapper, sound_manager,
+                    window=window, renderer=renderer, hud_renderer=hud_renderer, clock=clock)
+
+
+def _resolve_opponent_present(my_role: str, white_username: Optional[str],
+                               black_username: Optional[str]) -> bool:
+    """The room's creator (my_role == 'white') is the only case where the
+    other seat can still be empty at this point -- a joiner or viewer
+    always arrives after both relevant seats are already resolved."""
+    if my_role == 'white':
+        return black_username is not None
+    if my_role == 'black':
+        return white_username is not None
+    return True
 
 
 def run_network_game(ws_client, mapper: BoardMapper, my_role: str, room_id: str, initial_state: dict,
                       white_username: Optional[str] = None, white_elo: Optional[int] = None,
-                      black_username: Optional[str] = None, black_elo: Optional[int] = None) -> None:
+                      black_username: Optional[str] = None, black_elo: Optional[int] = None,
+                      facade=None, window=None, sound_manager=None, renderer=None, hud_renderer=None,
+                      clock=None) -> None:
     """Networked mode: board driven entirely by MultiplayerServer, via
     NetworkGameFacade. Imported lazily to keep the local-only path free of
     any networking import (websockets isn't needed to play hotseat).
@@ -86,35 +109,35 @@ def run_network_game(ws_client, mapper: BoardMapper, my_role: str, room_id: str,
     on a reconnect, straight from the login's state_sync envelope (see
     play_online.py) -- purely for HUD display, so all four are optional and
     None just falls back to the generic PLAYER_WHITE/BLACK labels with no
-    rating shown."""
-    from network.network_game_facade import NetworkGameFacade
+    rating shown.
 
-    # The room's creator (my_role == 'white') is the only case where the
-    # other seat can still be empty at this point -- a joiner or viewer
-    # always arrives after both relevant seats are already resolved.
-    if my_role == 'white':
-        opponent_present = black_username is not None
-    elif my_role == 'black':
-        opponent_present = white_username is not None
-    else:
-        opponent_present = True
+    The remaining keyword params are all injectable seams for tests (each
+    defaults to the real thing when omitted).
+    """
+    if facade is None:
+        from network.network_game_facade import NetworkGameFacade
+        opponent_present = _resolve_opponent_present(my_role, white_username, black_username)
+        facade = NetworkGameFacade(ws_client, mapper, initial_state, my_role, opponent_present=opponent_present)
 
-    facade = NetworkGameFacade(ws_client, mapper, initial_state, my_role, opponent_present=opponent_present)
-    sound_manager = SoundManager(my_color=facade.my_color)
+    if sound_manager is None:
+        sound_manager = SoundManager(my_color=facade.my_color)
     network_status_panel = NetworkStatusPanel()
     facade.subscribe(network_status_panel.on_event)
 
     _run_game_loop(facade, facade.board, mapper, sound_manager,
                     room_id=room_id, my_role=my_role, network_status_panel=network_status_panel,
                     white_username=white_username, white_elo=white_elo,
-                    black_username=black_username, black_elo=black_elo)
+                    black_username=black_username, black_elo=black_elo,
+                    window=window, renderer=renderer, hud_renderer=hud_renderer, clock=clock)
 
 
 def _run_game_loop(facade, board: Board, mapper: BoardMapper, sound_manager: SoundManager,
                     room_id: Optional[str] = None, my_role: Optional[str] = None,
                     network_status_panel: Optional[NetworkStatusPanel] = None,
                     white_username: Optional[str] = None, white_elo: Optional[int] = None,
-                    black_username: Optional[str] = None, black_elo: Optional[int] = None) -> None:
+                    black_username: Optional[str] = None, black_elo: Optional[int] = None,
+                    window=None, renderer=None, hud_renderer=None, clock=None,
+                    perf_counter=time.perf_counter, sleep_fn=time.sleep) -> None:
     """Shared render/tick loop for both local and networked play. `facade`
     is a GameFacade or NetworkGameFacade -- both expose the same interface
     (subscribe/request_click/request_jump/tick/get_selected_pos/
@@ -132,11 +155,13 @@ def _run_game_loop(facade, board: Board, mapper: BoardMapper, sound_manager: Sou
     white_fallback = WAITING_FOR_OPPONENT if is_networked else PLAYER_WHITE
     black_fallback = WAITING_FOR_OPPONENT if is_networked else PLAYER_BLACK
 
-    renderer = BoardRenderer(board, sprite_loader, str(board_img_path), facade, mapper)
-    hud_renderer = HudRenderer(800, 800,
-                                player_white=white_username or white_fallback,
-                                player_black=black_username or black_fallback,
-                                white_elo=white_elo, black_elo=black_elo)
+    if renderer is None:
+        renderer = BoardRenderer(board, sprite_loader, str(board_img_path), facade, mapper)
+    if hud_renderer is None:
+        hud_renderer = HudRenderer(800, 800,
+                                    player_white=white_username or white_fallback,
+                                    player_black=black_username or black_fallback,
+                                    white_elo=white_elo, black_elo=black_elo)
     hud_renderer.set_pieces_dir(pieces_path)
     hud_renderer.set_room_id(room_id)
     hud_renderer.set_my_role(my_role)
@@ -149,12 +174,14 @@ def _run_game_loop(facade, board: Board, mapper: BoardMapper, sound_manager: Sou
     # one. The role suffix (and the HUD's "You are: ..." line above) make
     # each window identifiable at a glance.
     window_title = f'{WINDOW_TITLE} -- {my_role.upper()}' if my_role else WINDOW_TITLE
-    window = Window(window_title, 800 + 300, 800)
+    if window is None:
+        window = Window(window_title, 800 + 300, 800)
     window.set_mouse_callback(mouse_controller.on_mouse_event)
     print(f'Window: "{window_title}". Zoom: press +/- with the window focused (no drag-resize -- '
           f'that broke click-to-cell mapping on this OpenCV build, see graphics/window.py).')
 
-    clock = AnimationClock()
+    if clock is None:
+        clock = AnimationClock()
 
     moves_log_panel = MovesLogPanel()
     score_panel = ScorePanel()
@@ -182,7 +209,7 @@ def _run_game_loop(facade, board: Board, mapper: BoardMapper, sound_manager: Sou
     frame_count = 0
 
     while window.is_open():
-        frame_start = time.perf_counter()
+        frame_start = perf_counter()
 
         dt_ms = clock.tick()
         if dt_ms > 200:  # Cap max dt to prevent jumps
@@ -225,10 +252,10 @@ def _run_game_loop(facade, board: Board, mapper: BoardMapper, sound_manager: Sou
         fps = 1000.0 / dt_ms if dt_ms > 0 else 0
         window.display_frame(full_frame, fps=fps)
 
-        elapsed_ms = (time.perf_counter() - frame_start) * 1000.0
+        elapsed_ms = (perf_counter() - frame_start) * 1000.0
         remaining_ms = target_frame_ms - elapsed_ms
         if remaining_ms > 0:
-            time.sleep(remaining_ms / 1000.0)
+            sleep_fn(remaining_ms / 1000.0)
 
         frame_count += 1
         if frame_count % 60 == 0:

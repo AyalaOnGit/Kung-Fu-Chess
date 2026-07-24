@@ -124,6 +124,70 @@ class TestGameEngine(unittest.TestCase):
         engine.wait(3000)
         self.assertFalse(engine.game_over)
 
+    def test_move_rejected_when_source_empty(self):
+        _, engine = self._make()
+        result = self._move(engine, Position(0, 0), Position(0, 3))
+        self.assertFalse(result.is_accepted)
+        self.assertEqual(result.reason, 'empty_source')
+
+    def test_move_rejected_when_illegal_for_piece(self):
+        p = W(Kind.ROOK, 0, 0)
+        _, engine = self._make(p)
+        result = self._move(engine, Position(0, 0), Position(3, 3))  # rook can't move diagonally
+        self.assertFalse(result.is_accepted)
+        self.assertEqual(result.reason, 'illegal_piece_move')
+
+    def test_jump_rejected_when_game_over(self):
+        p = W(Kind.ROOK, 0, 0)
+        _, engine = self._make(p)
+        engine.force_game_over()
+        result = self._jump(engine, Position(0, 0))
+        self.assertFalse(result.is_accepted)
+        self.assertEqual(result.reason, 'game_over')
+
+    def test_jump_rejected_when_source_empty(self):
+        _, engine = self._make()
+        result = self._jump(engine, Position(0, 0))
+        self.assertFalse(result.is_accepted)
+        self.assertEqual(result.reason, 'empty_source')
+
+    def test_get_cooldown_ratio_reflects_remaining_fraction(self):
+        p = W(Kind.ROOK, 0, 0)
+        _, engine = self._make(p, cooldown_ms=1000)
+        self._move(engine, Position(0, 0), Position(0, 3))
+        engine.wait(3000)  # arrives, cooldown starts
+        ratio_start = engine.get_cooldown_ratio(p)
+        self.assertGreater(ratio_start, 0.0)
+        self.assertLessEqual(ratio_start, 1.0)
+        engine.wait(1000)  # cooldown expires
+        self.assertEqual(engine.get_cooldown_ratio(p), 0.0)
+
+    def test_path_block_check_skips_cells_already_passed(self):
+        """_check_path_blocks must skip path cells the piece has already
+        travelled past (current_idx), scanning only what's ahead."""
+        p = W(Kind.ROOK, 0, 0)
+        _, engine = self._make(p)
+        self._move(engine, Position(0, 0), Position(0, 5))  # 5 steps, arrival=5000
+        engine.wait(2000)
+        engine.wait(1000)  # second tick: current_idx > 0, earlier cells are skipped
+        self.assertIsNone(engine.board.piece_at(Position(0, 5)))  # not yet arrived (clock=3000)
+
+    def test_in_flight_motion_redirected_around_friendly_flying_into_its_path(self):
+        """A second piece's own in-flight destination counts as an occupied
+        cell for path-blocking purposes even before it physically arrives
+        (the board only updates on arrival) -- so a friendly piece flying
+        toward a cell on another piece's path must shorten that path."""
+        a = W(Kind.ROOK, 0, 0)
+        c = W(Kind.ROOK, 5, 2)
+        b, engine = self._make(a, c)
+        self._move(engine, Position(0, 0), Position(0, 5))  # A: would arrive at 5000ms
+        self._move(engine, Position(5, 2), Position(0, 2))  # C: flies onto a cell on A's path
+        engine.wait(100)
+        engine.wait(900)  # total 1000ms: A's redirected arrival time
+        self.assertEqual(b.piece_at(Position(0, 1)), a)
+        self.assertIsNone(b.piece_at(Position(0, 0)))
+        self.assertIsNone(b.piece_at(Position(0, 5)))
+
 
 if __name__ == '__main__':
     unittest.main()

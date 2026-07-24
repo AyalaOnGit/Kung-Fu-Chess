@@ -88,6 +88,15 @@ class TestKnightRule(unittest.TestCase):
         dests = rule.legal_destinations(b, p)
         self.assertIn(Position(5, 4), dests)
 
+    def test_corner_skips_out_of_bounds_offsets(self):
+        """From a corner, most of the 8 L-shaped offsets land off the
+        board and must be skipped rather than raising or being included."""
+        rule = KnightRule()
+        p = W(Kind.KNIGHT, 0, 0)
+        b = board_with(p)
+        dests = rule.legal_destinations(b, p)
+        self.assertEqual(dests, {Position(2, 1), Position(1, 2)})
+
 
 class TestKingRule(unittest.TestCase):
     def test_one_cell_only(self):
@@ -98,6 +107,17 @@ class TestKingRule(unittest.TestCase):
         self.assertIn(Position(4, 4), dests)
         self.assertNotIn(Position(5, 5), dests)
         self.assertEqual(len(dests), 8)
+
+    def test_corner_skips_out_of_bounds_offsets(self):
+        """From a corner, 5 of the 8 one-step offsets land off the board."""
+        rule = KingRule()
+        p = W(Kind.KING, 0, 0)
+        b = board_with(p)
+        dests = rule.legal_destinations(b, p)
+        self.assertEqual(
+            dests,
+            {Position(0, 1), Position(1, 0), Position(1, 1)},
+        )
 
 
 class TestPawnRule(unittest.TestCase):
@@ -143,6 +163,16 @@ class TestPawnRule(unittest.TestCase):
         b = board_with(p, enemy)
         dests = self.rule.legal_destinations(b, p)
         self.assertNotIn(Position(3, 3), dests)
+
+    def test_diagonal_capture_skips_out_of_bounds_column(self):
+        """On the edge column, one diagonal capture direction falls off
+        the board and must be skipped rather than raising or included."""
+        p     = W(Kind.PAWN, 4, 0)
+        enemy = B(Kind.PAWN, 3, 1)
+        b = board_with(p, enemy)
+        dests = self.rule.legal_destinations(b, p)
+        self.assertIn(Position(3, 1), dests)   # valid diagonal capture still works
+        self.assertEqual(len(dests), 2)        # forward step + the one valid diagonal only
 
 
 class TestRuleEngine(unittest.TestCase):

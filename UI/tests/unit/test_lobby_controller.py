@@ -130,6 +130,17 @@ def test_already_in_a_room_error_shows_error_popup():
     assert outcome.error_popup == 'Already in a room.'
 
 
+def test_unrecognized_error_code_produces_an_empty_outcome():
+    """_handle_error's fallback branch -- a code that isn't one of the three
+    it special-cases must not pop up any popup or reset the queue."""
+    controller = LobbyController(_FakeWsClient())
+    envelope = Envelope(type='error', data={'code': 'some_other_code'})
+
+    outcome = controller.handle_envelope(envelope)
+
+    assert outcome == outcome.__class__()  # every field at its default
+
+
 def test_unrelated_envelope_types_produce_an_empty_outcome():
     controller = LobbyController(_FakeWsClient())
 
